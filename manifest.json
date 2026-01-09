@@ -1,6 +1,6 @@
 {
-  "name": "Interval Stopwatch",
-  "short_name": "Stopwatch",
+  "name": "Interval Timer",
+  "short_name": "Interval",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#000000",
