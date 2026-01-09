@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width,
+             initial-scale=1,
+             maximum-scale=1,
+             user-scalable=no"
+  />
+  <title>Interval Timer</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div></div>
+    <div id="status" class="status WARMUP">WARMUP</div>
+    <button id="settingsBtn" class="settings-btn" aria-label="Settings">
+      ⚙️
+    </button>
+  </div>
+
+  <!-- TIME DISPLAY -->
+  <div id="intervalTime" class="interval-time">00:00</div>
+  <div id="totalTime" class="total-time">Total 00:00</div>
+  <div id="setCount" class="set-count">Set 1</div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button id="toggleBtn">START</button>
+    <button id="resetBtn">RESET</button>
+  </div>
+
+</div>
+
+<!-- OVERLAY -->
+<div id="overlay" class="overlay"></div>
+
+<!-- SETTINGS PANEL -->
+<div id="settings" class="settings">
+  <div class="settings-header">
+    <span>Settings</span>
+    <button id="closeSettingsBtn">✕</button>
+  </div>
+
+<!-- WARMUP / FINISH -->
+<div class="settings-group">
+  <div class="settings-group-title">Prep & Finish</div>
+  <div class="setting-item">
+    <label>WARMUP (sec)</label>
+    <input id="warmupInput" type="number" min="0" />
+  </div>
+  <div class="setting-item">
+    <label>FINISH (sec)</label>
+    <input id="finishInput" type="number" min="0" />
+  </div>
+</div>
+
+  <!-- MAIN INTERVAL SETTINGS -->
+<div class="settings-group">
+  <div class="settings-group-title">Interval</div>
+  <div class="setting-item">
+    <label>RUN (sec)</label>
+    <input id="runInput" type="number" min="1" />
+  </div>
+  <div class="setting-item">
+    <label>WALK (sec)</label>
+    <input id="walkInput" type="number" min="1" />
+  </div>
+  <div class="setting-item">
+    <label>Set Count</label>
+    <input id="setInput" type="number" min="1" />
+  </div>
+</div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

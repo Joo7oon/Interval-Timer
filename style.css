@@ -1,0 +1,178 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont,
+               "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  height: 100%;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* TOP BAR */
+.top-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+
+.status {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.status.WARMUP { color: #ffaa00; }
+.status.RUN { color: #00ff99; }
+.status.WALK { color: #4da6ff; }
+.status.FINISH { color: #ff4d4d; }
+
+/* SETTINGS BUTTON FIX */
+.settings-btn {
+  justify-self: end;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  background: #222;
+  color: #fff;
+}
+
+/* TIME DISPLAY */
+.interval-time {
+  font-size: 72px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.total-time {
+  text-align: center;
+  opacity: 0.6;
+}
+
+.set-count {
+  text-align: center;
+  opacity: 0.6;
+  font-size: 16px;
+}
+
+/* CONTROLS */
+.controls {
+  display: flex;
+  gap: 16px;
+}
+
+.controls button {
+  flex: 1;
+  padding: 18px 0;
+  font-size: 22px;
+  font-weight: bold;
+  border-radius: 14px;
+  border: none;
+}
+
+#toggleBtn { background: #00ff99; color: #000; }
+#resetBtn { background: #333; color: #fff; }
+
+/* OVERLAY */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 9;
+}
+
+.overlay.open { opacity: 1; pointer-events: auto; }
+
+/* SETTINGS PANEL */
+.settings {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #111;
+  padding: 20px;
+  border-radius: 20px 20px 0 0;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.settings.open {
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 22px;
+  margin-bottom: 20px;
+}
+
+.settings-header button {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 20px;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.setting-item input {
+  width: 90px;
+  font-size: 18px;
+  text-align: center;
+  border-radius: 8px;
+  border: none;
+}
+
+/* 그룹 감싸기 */
+.settings-group {
+  margin-bottom: 16px;              /* 그룹 간 간격 */
+  padding: 12px 16px;               /* 그룹 내부 여백 */
+  border-radius: 12px;              /* 둥근 박스 */
+  background: rgba(255,255,255,0.05); /* 살짝 밝은 배경 */
+  border: 1px solid rgba(255,255,255,0.1); /* 얇은 테두리 */
+}
+
+/* 그룹 제목 */
+.settings-group-title {
+  font-weight: 700;
+  font-size: 18px;
+  margin-bottom: 10px;
+  opacity: 0.8;
+  letter-spacing: 1px;
+}
