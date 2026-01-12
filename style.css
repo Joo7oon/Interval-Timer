@@ -61,6 +61,21 @@ html, body {
   color: #fff;
 }
 
+.calendar-btn {
+  justify-self: start;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  background: #222;
+  color: #fff;
+}
+
 /* TIME DISPLAY */
 .interval-time {
   font-size: 72px;
@@ -71,12 +86,19 @@ html, body {
 .total-time {
   text-align: center;
   opacity: 0.6;
+  font-size: 18px; /* larger */
+  font-weight: 800;
+  opacity: 0.95;
+  line-height: 1;
 }
 
 .set-count {
   text-align: center;
   opacity: 0.6;
-  font-size: 16px;
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.7;
+  margin-bottom: -2px; /* pull slightly closer to total */
 }
 
 /* CONTROLS */
@@ -123,6 +145,11 @@ html, body {
   transition: transform 0.3s ease;
   z-index: 10;
   pointer-events: none;
+
+  max-height: calc(100vh - 84px); /* leave room for top UI */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: env(safe-area-inset-bottom,20px);
 }
 
 .settings.open {
@@ -146,19 +173,34 @@ html, body {
   font-size: 20px;
 }
 
+/* Align label + input using grid so inputs start at same x position */
 .setting-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr 86px; /* label grows, input fixed on right */
   align-items: center;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.setting-item label {
+  font-weight: 700;
+  color: #cfcfcf;
+  white-space: normal;
+  word-break: break-word;
+}
+.setting-item input {
+  width: auto;             /* allow fixed max-width to take effect */
+  max-width: 86px;         /* compact input width */
+  padding: 8px 6px;
+  box-sizing: border-box;
+  justify-self: end;       /* keep input aligned to right column edge */
+  text-align: center;      /* center the text inside */
+  border-radius: 10px;
 }
 
-.setting-item input {
-  width: 90px;
-  font-size: 18px;
-  text-align: center;
-  border-radius: 8px;
-  border: none;
+/* small screens: keep grid but use slightly smaller label column */
+@media (max-width: 420px) {
+  .setting-item { grid-template-columns: 1fr 72px; }
+  .setting-item input { max-width: 72px; padding: 6px 8px; font-size: 14px; }
 }
 
 /* 그룹 감싸기 */
@@ -177,4 +219,279 @@ html, body {
   margin-bottom: 10px;
   opacity: 0.8;
   letter-spacing: 1px;
+}
+
+/* keep date label space stable to avoid jump when text changes */
+.settings-group-title {
+  min-height: 22px; /* reserve space so selecting doesn't shift UI */
+  font-size: 14px;
+  color: #cfcfcf;
+}
+.settings-group-title.placeholder {
+  color: #888; /* lighter placeholder color */
+}
+
+/* CALENDAR */
+.calendar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #111;
+  padding: 12px 16px 20px;
+  border-radius: 20px 20px 0 0;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+  z-index: 11;
+  pointer-events: none;
+}
+
+.calendar.open {
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.cal-nav {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 18px;
+}
+
+.calendar-month-year {
+  min-width: 140px;
+  text-align: center;
+}
+
+.calendar-grid { margin-bottom: 12px; }
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px; /* match .calendar-days gap so headers align with cells */
+  color: #aaa;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+/* ensure each weekday cell is centered and has same vertical spacing as day cells */
+.calendar-weekdays > div {
+  text-align: center;
+  padding: 6px 0;
+}
+
+.calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px; /* was 6px */
+  /* slightly taller rows so date + two small lines fit comfortably */
+  grid-auto-rows: 64px;
+  /* reserve space for up to 6 rows to avoid layout jumps */
+  min-height: calc(6 * 64px + 5 * 10px);
+}
+
+/* slightly smaller row height on very small screens (iPhone, etc.) */
+@media (max-width: 420px) {
+  .calendar-days {
+    grid-auto-rows: 56px;
+    min-height: calc(6 * 56px + 5 * 6px);
+  }
+  .calendar-day { min-height: unset; } /* allow the cell to use the grid row height */
+}
+
+/* Calendar day number + record under the number */
+.calendar-day {
+  background: rgba(255,255,255,0.03);
+  padding: 8px 6px;      /* slightly taller cell padding for breathe */
+  text-align: center;
+  border-radius: 8px;
+  /* let grid rows control height */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #ddd;
+  font-weight: 700;
+}
+
+/* the day numeric */
+.calendar-day .day-number {
+  font-size: 14px;         /* slightly smaller so record lines fit */
+  line-height: 1;
+  margin-bottom: 2px;    /* reduce the blank space beneath number */
+}
+
+/* record block under the day (two lines: km, min) */
+.calendar-day .day-record {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 0;
+  gap: 2px;              /* small breathing space between km and minute */
+  line-height: 1;
+  }
+.calendar-day .day-record .km {
+  font-size: 11px;
+  color: #9fdba8;
+  opacity: 0.98;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.calendar-day .day-record .min {
+  font-size: 10px;
+  color: #bfeec7;
+  opacity: 0.95;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+/* slightly reduce other-month size to keep layout balanced */
+.calendar-day.other-month { opacity: 0.35; }
+
+.calendar-day.selected {
+  outline: 2px solid #00ff99;
+  background: rgba(0,255,153,0.06);
+}
+
+.calendar-day .entry-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00ff99;
+  margin: 6px auto 0;
+}
+
+.calendar-details { margin-top: 6px; }
+
+/* Week / Month summaries inside calendar */
+.calendar-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.calendar-summary-item {
+  font-size: 13px;
+  color: #bbb;
+  opacity: 0.95;
+}
+
+/* Make setting inputs look nicer but keep the app look */
+.setting-item input {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-weight: 700;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  text-align: center; /* center text inside inputs */
+}
+
+/* smaller numeric input appearance */
+.setting-item input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+  text-align: center; /* ensure numbers are centered too */
+}
+
+/* small button style for header close */
+.settings-header-button {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 20px;
+}
+
+/* SETTINGS INPUTS: label + input side-by-side and responsive */
+.setting-item {
+  display: grid;
+  grid-template-columns: 1fr 86px; /* label grows, input fixed on right */
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.setting-item label {
+  font-weight: 700;
+  color: #cfcfcf;
+  white-space: normal;
+  word-break: break-word;
+}
+.setting-item input {
+  width: auto;             /* allow fixed max-width to take effect */
+  max-width: 86px;         /* compact input width */
+  padding: 8px 6px;
+  box-sizing: border-box;
+  justify-self: end;       /* keep input aligned to right column edge */
+  text-align: center;      /* center the text inside */
+  border-radius: 10px;
+}
+
+/* small screens: keep grid but use slightly smaller label column */
+@media (max-width: 420px) {
+  .setting-item { grid-template-columns: 1fr 72px; }
+  .setting-item input { max-width: 72px; padding: 6px 8px; font-size: 14px; }
+}
+
+/* Calendar action buttons: match main menu style */
+.calendar-details .controls {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.calendar-details .controls button {
+  flex: 1;
+  padding: 14px 0;
+  font-size: 18px;
+  font-weight: 800;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.25);
+  transition: transform 0.08s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+#saveRunBtn {
+  background: linear-gradient(180deg,#28f5a1,#00d06a);
+  color: #00220a;
+}
+#deleteRunBtn {
+  background: #333;
+  color: #fff;
+}
+
+/* hover / active */
+.calendar-details .controls button:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,0,0,0.30); }
+.calendar-details .controls button:active { transform: translateY(0); box-shadow: 0 4px 8px rgba(0,0,0,0.22); opacity: 0.98; }
+
+/* small screens: slightly smaller touch targets */
+@media (max-width:420px) {
+  .calendar-details .controls button { padding: 12px 0; font-size: 16px; }
+}
+
+/* group set + total together and stack vertically */
+.top-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }

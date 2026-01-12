@@ -32,7 +32,9 @@
 
   <!-- TOP BAR -->
   <div class="top-bar">
-    <div></div>
+    <button id="calendarBtn" class="calendar-btn" aria-label="Calendar">
+      📅
+    </button>
     <div id="status" class="status WARMUP">WARMUP</div>
     <button id="settingsBtn" class="settings-btn" aria-label="Settings">
       ⚙️
@@ -41,8 +43,10 @@
 
   <!-- TIME DISPLAY -->
   <div id="intervalTime" class="interval-time">00:00</div>
-  <div id="totalTime" class="total-time">Total 00:00</div>
+  <div class="top-meta">
   <div id="setCount" class="set-count">Set 1</div>
+  <div id="totalTime" class="total-time">Total 00:00</div>
+  </div>
 
   <!-- CONTROLS -->
   <div class="controls">
@@ -91,6 +95,49 @@
     <input id="setInput" type="number" min="1" />
   </div>
 </div>
+</div>
+
+<!-- CALENDAR PANEL -->
+<div id="calendar" class="calendar" aria-hidden="true">
+  <div class="calendar-header">
+    <div class="calendar-nav">
+      <button id="prevMonthBtn" class="cal-nav" aria-label="Previous month">◀</button>
+      <div id="calendarMonthYear" class="calendar-month-year"></div>
+      <button id="nextMonthBtn" class="cal-nav" aria-label="Next month">▶</button>
+    </div>
+    <button id="closeCalendarBtn" class="settings-header-button" aria-label="Close calendar">✕</button>
+  </div>
+
+  <div class="calendar-grid">
+    <div class="calendar-weekdays">
+      <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+    </div>
+    <div id="calendarDays" class="calendar-days"></div>
+  </div>
+
+  <div id="calendarDetails" class="calendar-details">
+    <div id="selectedDateLabel" class="settings-group-title"></div>
+
+    <div class="calendar-summary">
+      <div id="weekSummary" class="calendar-summary-item">Week: 00:00 · 0.00 km</div>
+      <div id="monthSummary" class="calendar-summary-item">Month: 00:00 · 0.00 km</div>
+    </div>
+
+    <div class="setting-item">
+      <label>Run Time (min)</label>
+      <input id="runTimeInput" type="number" inputmode="numeric" min="0" step="1" placeholder="mm" />
+    </div>
+
+    <div class="setting-item">
+      <label>Run Distance (km)</label>
+      <input id="runDistInput" type="number" min="0" step="0.01" />
+    </div>
+
+    <div class="controls">
+      <button id="saveRunBtn">SAVE</button>
+      <button id="deleteRunBtn">DELETE</button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>
