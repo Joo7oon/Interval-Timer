@@ -16,7 +16,7 @@ const calendarBtn = document.getElementById('calendarBtn');
 
 // make calendar-related refs mutable so we can re-query / create them if they are missing
 let calendarEl, closeCalendarBtn, prevMonthBtn, nextMonthBtn, calendarMonthYear, calendarDaysEl, selectedDateLabel;
-let runTimeInput, runDistInput, saveRunBtn, deleteRunBtn;
+let runTimeInput, runDistInput, saveRunBtn, deleteRunBtn, gymCheckbox; // <- added gymCheckbox
 
 const runInput = document.getElementById('runInput');
 const walkInput = document.getElementById('walkInput');
@@ -213,6 +213,7 @@ function selectDate(dateStr, dateObj) {
   const log = getLogFor(dateStr);
   runTimeInput.value = log ? String(Math.round((log.timeSec || 0) / 60)) : '';
   runDistInput.value = log && log.distanceKm != null ? log.distanceKm : '';
+  if (gymCheckbox) gymCheckbox.checked = !!(log && log.gym);
   renderCalendar(calDate.getFullYear(), calDate.getMonth());
   updateSummaries(dateObj);
 }
@@ -269,7 +270,16 @@ function ensureCalendarMarkup() {
 
           <div class="setting-item">
             <label>Run Distance (km)</label>
-            <input id="runDistInput" type="number" min="0" step="0.01" />
+            <!-- type="text" + inputmode="decimal" (no pattern) so iOS always allows '.' -->
+            <input id="runDistInput" type="text" inputmode="decimal" placeholder="0.00" />
+          </div>
+
+          <div class="setting-item">
+            <label for="gymCheckbox">Gym</label>
+            <div class="toggle" aria-hidden="false">
+              <input id="gymCheckbox" type="checkbox" />
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </div>
           </div>
 
           <div class="controls">
@@ -296,6 +306,7 @@ function ensureCalendarMarkup() {
   runDistInput = document.getElementById('runDistInput');
   saveRunBtn = document.getElementById('saveRunBtn');
   deleteRunBtn = document.getElementById('deleteRunBtn');
+  gymCheckbox = document.getElementById('gymCheckbox');
 
   // wire handlers (idempotent)
   calendarBtn.onclick = openCalendar;
@@ -311,31 +322,12 @@ function ensureCalendarMarkup() {
   saveRunBtn.onclick = saveRunBtnHandler;
   deleteRunBtn.onclick = deleteRunBtnHandler;
 
-  // runTime input: digits-only + integer minutes on blur
-  if (runTimeInput) {
-    runTimeInput.addEventListener('input', (e) => {
-      e.target.value = String(e.target.value).replace(/[^\d]/g, '');
-    });
-    runTimeInput.addEventListener('blur', (e) => {
-      if (e.target.value === '') return;
-      const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
-      e.target.value = String(v);
-    });
-  }
-
-  // runDist input: sanitize and format on blur
-  if (runDistInput) {
-    runDistInput.addEventListener('input', (e) => {
-      const cleaned = String(e.target.value).replace(/[^\d.]/g, '');
-      const parts = cleaned.split('.');
-      e.target.value = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0,2) : cleaned;
-    });
-    runDistInput.addEventListener('blur', (e) => {
-      if (e.target.value === '') return;
-      const n = Number(e.target.value);
-      if (!Number.isFinite(n) || n <= 0) { e.target.value = ''; return; }
-      let s = n.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
-      e.target.value = s;
+  // ensure gym checkbox exists and doesn't break tabbing; auto-save on change
+  if (gymCheckbox) {
+    gymCheckbox.checked = false;
+    gymCheckbox.addEventListener('change', () => {
+      // if a date is selected, save immediately for instant feedback
+      if (selectedDateStr) saveRunBtnHandler();
     });
   }
 }
@@ -344,11 +336,10 @@ function ensureCalendarMarkup() {
 function formatDistanceDisplay(d) {
   if (d == null || d === '') return '';
   const n = Number(d) || 0;
-  let s = n.toFixed(2);
-  s = s.replace(/\.00$/, '');
-  s = s.replace(/\.0$/, '');
-  s = s.replace(/(\.\d)0$/, '$1');
-  return s;
+  if (n >= 1000) return `${(n/1000).toFixed(1).replace(/\.0$/,'')}k`; // e.g. 1500 -> 1.5k
+  if (n >= 100) return `${Math.round(n)}km`; // 125 -> 125km (integer)
+  const s = n.toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
+  return `${s}km`; // e.g. 5.5km or 3km
 }
 
 /* RENDER CALENDAR - builds day cells and per-day record lines */
@@ -391,8 +382,8 @@ function renderCalendar(year, month) {
 
     const dateStr = formatYYYYMMDD(cellDate);
 
-    // number
-    dayEl.innerHTML = `<div class="day-number">${String(cellDate.getDate())}</div>`;
+    // number + gym placeholder
+    dayEl.innerHTML = `<div class="day-number">${String(cellDate.getDate())}</div><div class="gym-badge" aria-hidden="true"></div>`;
 
     if (!inThisMonth) {
       dayEl.style.opacity = '0.45';
@@ -401,7 +392,18 @@ function renderCalendar(year, month) {
 
       const entry = logs[dateStr];
       if (entry) {
-        const kmVal = (entry.distanceKm != null && entry.distanceKm !== '') ? `${formatDistanceDisplay(entry.distanceKm)}km` : '';
+        // set the placeholder badge text (keeps consistent cell height)
+        const gymBadgeEl = dayEl.querySelector('.gym-badge');
+        if (gymBadgeEl) {
+          if (entry.gym === true || entry.gym === 'true' || entry.gym === 1 || entry.gym === '1' || !!entry.gym) {
+            gymBadgeEl.textContent = 'GYM';
+            gymBadgeEl.classList.add('active');
+          } else {
+            gymBadgeEl.textContent = '';
+            gymBadgeEl.classList.remove('active');
+          }
+        }
+        const kmVal = (entry.distanceKm != null && entry.distanceKm !== '') ? formatDistanceDisplay(entry.distanceKm) : '';
         const minVal = entry.timeSec ? `${Math.round(Number(entry.timeSec) / 60)}m` : '';
 
         if (kmVal || minVal) {
@@ -446,14 +448,21 @@ function saveRunBtnHandler() {
   if (!selectedDateStr) return;
   const minutes = Number(runTimeInput.value) || 0;
   const timeSec = Math.max(0, Math.floor(minutes)) * 60;
-  const distanceKm = runDistInput.value === '' ? null : Number(runDistInput.value);
+  const distanceKm = runDistInput && runDistInput.value !== '' ? Number(String(runDistInput.value).replace(',', '.')) : null;
   const logs = loadRunLogs();
-  if (timeSec > 0 || (distanceKm !== null && distanceKm > 0)) {
-    logs[selectedDateStr] = { timeSec, distanceKm };
+  const gym = !!(gymCheckbox && gymCheckbox.checked); // ensure boolean
+  if (timeSec > 0 || (distanceKm !== null && distanceKm > 0) || gym) {
+    const entry = logs[selectedDateStr] || {};
+    entry.timeSec = timeSec;
+    entry.distanceKm = distanceKm;
+    entry.gym = gym;
+    logs[selectedDateStr] = entry;
   } else {
     delete logs[selectedDateStr];
   }
   saveRunLogs(logs);
+  console.log('Saved run log', selectedDateStr, logs[selectedDateStr]); // debug helper
+  if (gymCheckbox) gymCheckbox.checked = !!logs[selectedDateStr]?.gym;
   safeRenderCalendar();
   updateSummaries(new Date(selectedDateStr + 'T00:00:00'));
 }
@@ -465,6 +474,7 @@ function deleteRunBtnHandler() {
   saveRunLogs(logs);
   runTimeInput.value = '';
   runDistInput.value = '';
+  if (gymCheckbox) gymCheckbox.checked = false;
   safeRenderCalendar();
   updateSummaries(new Date(selectedDateStr + 'T00:00:00'));
 }

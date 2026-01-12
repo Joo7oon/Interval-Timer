@@ -188,19 +188,76 @@ html, body {
   word-break: break-word;
 }
 .setting-item input {
-  width: auto;             /* allow fixed max-width to take effect */
-  max-width: 86px;         /* compact input width */
+  width: 86px;            /* fixed compact width that never expands */
   padding: 8px 6px;
   box-sizing: border-box;
   justify-self: end;       /* keep input aligned to right column edge */
   text-align: center;      /* center the text inside */
   border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
-/* small screens: keep grid but use slightly smaller label column */
+/* Toggle switch styling (clean & accessible) */
+.toggle {
+  position: relative;
+  display: inline-block;
+  height: 28px;
+}
+.toggle input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  z-index: 2;
+  cursor: pointer;
+}
+.toggle .toggle-slider {
+  display: inline-block;
+  width: 48px;
+  height: 28px;
+  background: #222;
+  border-radius: 999px;
+  transition: background 0.14s ease, box-shadow 0.12s ease;
+  box-shadow: inset 0 -2px 0 rgba(0,0,0,0.35);
+  position: relative;
+}
+.toggle .toggle-slider::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.16s ease, box-shadow 0.12s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+}
+.toggle input:checked + .toggle-slider {
+  background: linear-gradient(180deg,#28f5a1,#00d06a);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.18);
+}
+.toggle input:checked + .toggle-slider::after {
+  transform: translateX(20px);
+}
+.toggle input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 4px rgba(40, 245, 161, 0.12);
+}
+
+/* small screens */
 @media (max-width: 420px) {
   .setting-item { grid-template-columns: 1fr 72px; }
-  .setting-item input { max-width: 72px; padding: 6px 8px; font-size: 14px; }
+  .setting-item input[type="number"],
+  .setting-item input[type="text"],
+  .setting-item .toggle { width: 72px; }
+  .toggle .toggle-slider { width: 40px; height: 26px; }
+  .toggle .toggle-slider::after { width: 18px; height: 18px; left: 4px; top: 4px; }
+  .toggle input:checked + .toggle-slider::after { transform: translateX(16px); }
 }
 
 /* 그룹 감싸기 */
@@ -347,18 +404,32 @@ html, body {
   line-height: 1;
   }
 .calendar-day .day-record .km {
-  font-size: 11px;
+  font-size: 9px;            /* smaller */
+  max-width: 56px;          /* prevent long values from expanding layout */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: #9fdba8;
-  opacity: 0.98;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  opacity: 0.95;
+  font-weight: 600;
+  letter-spacing: 0.1px;
 }
 .calendar-day .day-record .min {
-  font-size: 10px;
+  font-size: 8px;           /* slightly smaller than km */
+  max-width: 56px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: #bfeec7;
-  opacity: 0.95;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  opacity: 0.9;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+
+/* small screens: scale down a bit more */
+@media (max-width: 420px) {
+  .calendar-day .day-record .km { font-size: 8px; max-width: 48px; }
+  .calendar-day .day-record .min { font-size: 7px; max-width: 48px; }
 }
 
 /* slightly reduce other-month size to keep layout balanced */
@@ -437,13 +508,16 @@ html, body {
   word-break: break-word;
 }
 .setting-item input {
-  width: auto;             /* allow fixed max-width to take effect */
-  max-width: 86px;         /* compact input width */
+  width: 86px;            /* fixed compact width that never expands */
   padding: 8px 6px;
   box-sizing: border-box;
   justify-self: end;       /* keep input aligned to right column edge */
   text-align: center;      /* center the text inside */
   border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 /* small screens: keep grid but use slightly smaller label column */
@@ -494,4 +568,80 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+/* ensure compact inputs don't expand the layout on long text */
+.setting-item input {
+  max-width: 86px;
+  width: 86px;            /* fixed compact width that never expands */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  /* use tabular digits so decimal doesn't change layout width */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-feature-settings: "tnum" 1;
+  font-feature-settings: "tnum" 1;
+}
+
+/* extra safety for distance input */
+#runDistInput {
+  width: 80px;
+  max-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Per-day record text shouldn't expand cell width — ellipsis if needed */
+.calendar-day .day-record .km,
+.calendar-day .day-record .min {
+  display: block;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* small badge under the date showing gym flag (keeps design minimal) */
+.gym-badge {
+  font-size: 9px;
+  font-weight: 800;
+  color: #4da6ff;
+  margin-top: 2px;
+  line-height: 1;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+/* make the GYM checkbox align nicely inside setting-item */
+#gymCheckbox {
+  width: 20px;
+  height: 20px;
+  justify-self: end;
+}
+
+/* reserve space and add a little gap between date and GYM badge */
+.calendar-day .gym-badge {
+  /* no extra gap by default so date sits close to km/min when no GYM */
+  margin-top: 0;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  color: transparent;    /* keep invisible when empty */
+  transition: color 0.12s ease, opacity 0.12s ease;
+  letter-spacing: 0.5px;
+}
+
+/* visible colored badge when active */
+.calendar-day .gym-badge.active {
+  margin-top: 8px; /* add breathing room only when GYM is shown */
+  color: #4da6ff;
+  opacity: 1;
+}
+
+/* ensure day-number / badge stack consistently */
+.calendar-day .day-number {
+  margin-bottom: 0; /* tighten internal spacing; badge margin handles gap */
 }
