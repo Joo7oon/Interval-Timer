@@ -44,6 +44,7 @@ let isRunning = false;
 let timerId = null;
 let audioContext = null;
 let wakeLock = null;
+let lastTick = 0; // ms timestamp used for accurate ticking
 
 /* UTIL */
 function formatTime(sec) {
@@ -538,6 +539,25 @@ function switchMode() {
   }
 }
 
+/* Handle consuming N whole seconds (may cross multiple modes) */
+function consumeElapsedSeconds(seconds) {
+  let sec = seconds;
+  while (sec > 0 && isRunning) {
+    if (sec >= intervalSecondsLeft) {
+      // consume to the end of this mode
+      totalSeconds += intervalSecondsLeft;
+      sec -= intervalSecondsLeft;
+      intervalSecondsLeft = 0;
+      switchMode();
+      if (!isRunning) break; // stopped at FINISH
+    } else {
+      totalSeconds += sec;
+      intervalSecondsLeft -= sec;
+      sec = 0;
+    }
+  }
+}
+
 /* WAKE LOCK */
 async function requestWakeLock() {
   try { wakeLock = await navigator.wakeLock.request('screen'); } catch{}
@@ -545,7 +565,17 @@ async function requestWakeLock() {
 function releaseWakeLock() { if(wakeLock) wakeLock.release(); wakeLock=null; }
 
 document.addEventListener('visibilitychange', async ()=>{
-  if(document.visibilityState==='visible' && isRunning) await requestWakeLock();
+  if (document.visibilityState === 'visible' && isRunning) {
+    await requestWakeLock();
+    // immediately catch up any elapsed time while hidden/suspended
+    const now = Date.now();
+    const elapsedSec = lastTick ? Math.floor((now - lastTick) / 1000) : 0;
+    if (elapsedSec >= 1) {
+      lastTick = now;
+      consumeElapsedSeconds(elapsedSec);
+      updateDisplay();
+    }
+  }
 });
 
 /* START / PAUSE */
@@ -556,12 +586,20 @@ toggleBtn.onclick = async ()=>{
     await requestWakeLock();
     isRunning=true;
 
+    // use a short poll (500ms) but base all progress on wall-clock time
+    lastTick = Date.now();
+    const TICK_MS = 500;
     timerId = setInterval(()=>{
-      totalSeconds++;
-      intervalSecondsLeft--;
-      if(intervalSecondsLeft<=0) switchMode();
-      updateDisplay();
-    },1000);
+      const now = Date.now();
+      let elapsedMs = now - lastTick;
+      if (elapsedMs < 0) elapsedMs = 0;
+      const elapsedSec = Math.floor(elapsedMs / 1000);
+      if (elapsedSec >= 1) {
+        lastTick += elapsedSec * 1000;
+        consumeElapsedSeconds(elapsedSec);
+        updateDisplay();
+      }
+    }, TICK_MS);
   }else{
     isRunning=false;
     clearInterval(timerId);
