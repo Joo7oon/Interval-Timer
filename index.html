@@ -24,9 +24,10 @@
   <link rel="apple-touch-icon" href="icon-192.png">
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="theme-WARMUP">
 
 <div class="app">
 
@@ -36,16 +37,28 @@
       📅
     </button>
     <div id="status" class="status WARMUP">WARMUP</div>
-    <button id="settingsBtn" class="settings-btn" aria-label="Settings">
-      ⚙️
-    </button>
+    <div class="top-bar-right">
+      <button id="pipBtn" class="pip-btn" aria-label="Picture-in-Picture Toggle">🖼️</button>
+      <button id="muteBtn" class="mute-btn" aria-label="Mute Toggle">🔊</button>
+      <button id="settingsBtn" class="settings-btn" aria-label="Settings">
+        ⚙️
+      </button>
+    </div>
   </div>
 
-  <!-- TIME DISPLAY -->
-  <div id="intervalTime" class="interval-time">00:00</div>
-  <div class="top-meta">
-  <div id="setCount" class="set-count">Set 1</div>
-  <div id="totalTime" class="total-time">Total 00:00</div>
+  <!-- TIME DISPLAY WITH CIRCULAR PROGRESS RING -->
+  <div class="timer-container">
+    <svg class="progress-ring" viewBox="0 0 280 280">
+      <circle class="progress-ring__bg" cx="140" cy="140" r="125" />
+      <circle class="progress-ring__circle" id="progressCircle" cx="140" cy="140" r="125" />
+    </svg>
+    <div class="timer-center">
+      <div id="intervalTime" class="interval-time">00:00</div>
+      <div class="top-meta">
+        <div id="setCount" class="set-count">Set 1</div>
+        <div id="totalTime" class="total-time">Total 00:00</div>
+      </div>
+    </div>
   </div>
 
   <!-- CONTROLS -->
@@ -64,6 +77,15 @@
   <div class="settings-header">
     <span>Settings</span>
     <button id="closeSettingsBtn">✕</button>
+  </div>
+
+  <!-- PRESETS SECTION -->
+  <div class="settings-group">
+    <div class="preset-header">
+      <div class="settings-group-title">Presets</div>
+      <button id="savePresetBtn" class="save-preset-btn">+ Save Current</button>
+    </div>
+    <div id="presetsList" class="presets-chips-container"></div>
   </div>
 
 <!-- WARMUP / FINISH -->
@@ -105,6 +127,7 @@
       <div id="calendarMonthYear" class="calendar-month-year"></div>
       <button id="nextMonthBtn" class="cal-nav" aria-label="Next month">▶</button>
     </div>
+    <div id="streakCounter" class="streak-badge">🔥 0일 연속 러닝!</div>
     <button id="closeCalendarBtn" class="settings-header-button" aria-label="Close calendar">✕</button>
   </div>
 
@@ -123,9 +146,9 @@
       <div id="monthSummary" class="calendar-summary-item">Month: 00:00 · 0.00 km</div>
     </div>
 
-    <div id="calendarExportImport" class="controls" aria-hidden="true" style="display:none; margin-bottom: 12px;">
-      <button id="exportCalendarBtn" type="button">EXPORT</button>
-      <button id="importCalendarBtn" type="button">IMPORT</button>
+    <div id="calendarExportImport" class="controls" style="display:flex; margin-bottom: 12px;">
+      <button id="exportCalendarBtn" type="button">JSON EXPORT</button>
+      <button id="importCalendarBtn" type="button">JSON IMPORT</button>
     </div>
 
     <div class="setting-item">
@@ -147,6 +170,8 @@
     </div>
   </div>
 </div>
+<canvas id="pipCanvas" width="300" height="300" style="display:none;"></canvas>
+<video id="pipVideo" autoplay muted playsinline style="display:none;"></video>
 <input id="importCalendarFile" type="file" accept=".txt,.json" style="display:none" />
 <script src="app.js"></script>
 </body>

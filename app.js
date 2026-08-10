@@ -47,9 +47,72 @@ let currentMode = 'WARMUP';
 let setCount = 1;
 let isRunning = false;
 let timerId = null;
+let timerWorker = null;
 let audioContext = null;
 let wakeLock = null;
 let lastTick = 0; // ms timestamp used for accurate ticking
+
+function initTimerWorker() {
+  if (window.Worker) {
+    try {
+      timerWorker = new Worker('timer-worker.js');
+      timerWorker.onmessage = function (e) {
+        const data = e.data || {};
+        if (data.type === 'tick' && isRunning) {
+          const elapsedSec = Number(data.elapsedSec) || 1;
+          lastTick = Date.now();
+          consumeElapsedSeconds(elapsedSec);
+          updateDisplay();
+        }
+      };
+    } catch (err) {
+      console.warn('Web Worker creation failed, fallback to main thread timer:', err);
+      timerWorker = null;
+    }
+  }
+}
+initTimerWorker();
+
+function startTimerLoop() {
+  lastTick = Date.now();
+  if (timerWorker) {
+    timerWorker.postMessage({ command: 'start' });
+  } else {
+    if (timerId) clearInterval(timerId);
+    const TICK_MS = 500;
+    timerId = setInterval(() => {
+      const now = Date.now();
+      let elapsedMs = now - lastTick;
+      if (elapsedMs < 0) elapsedMs = 0;
+      const elapsedSec = Math.floor(elapsedMs / 1000);
+      if (elapsedSec >= 1) {
+        lastTick += elapsedSec * 1000;
+        consumeElapsedSeconds(elapsedSec);
+        updateDisplay();
+      }
+    }, TICK_MS);
+  }
+}
+
+function pauseTimerLoop() {
+  if (timerWorker) {
+    timerWorker.postMessage({ command: 'pause' });
+  }
+  if (timerId) {
+    clearInterval(timerId);
+    timerId = null;
+  }
+}
+
+function resetTimerLoop() {
+  if (timerWorker) {
+    timerWorker.postMessage({ command: 'reset' });
+  }
+  if (timerId) {
+    clearInterval(timerId);
+    timerId = null;
+  }
+}
 
 /* UTIL */
 function formatTime(sec) {
@@ -58,17 +121,159 @@ function formatTime(sec) {
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
+const progressCircle = document.getElementById('progressCircle');
+const RING_CIRCUMFERENCE = 2 * Math.PI * 125; // 785.398
+
+function getModeTotalSeconds(mode) {
+  switch (mode) {
+    case 'WARMUP': return settings.warmup || 1;
+    case 'RUN': return settings.run || 1;
+    case 'WALK': return settings.walk || 1;
+    case 'FINISH': return settings.finish || 1;
+    default: return 1;
+  }
+}
+
+function updateProgressRing() {
+  if (!progressCircle) return;
+  const total = getModeTotalSeconds(currentMode);
+  const ratio = Math.max(0, Math.min(1, intervalSecondsLeft / total));
+  const offset = RING_CIRCUMFERENCE * (1 - ratio);
+  progressCircle.style.strokeDashoffset = offset;
+}
+
+function updateThemeClass() {
+  document.body.className = `theme-${currentMode}`;
+}
+
+const pipBtn = document.getElementById('pipBtn');
+const pipCanvas = document.getElementById('pipCanvas');
+const pipVideo = document.getElementById('pipVideo');
+let pipCtx = pipCanvas ? pipCanvas.getContext('2d') : null;
+let pipStream = null;
+
+function renderPipCanvas() {
+  if (!pipCtx || !pipCanvas) return;
+  const width = pipCanvas.width;
+  const height = pipCanvas.height;
+
+  let bgColor = '#2ed573';
+  if (currentMode === 'RUN') bgColor = '#ff4757';
+  else if (currentMode === 'WALK') bgColor = '#1e90ff';
+  else if (currentMode === 'FINISH') bgColor = '#a55eea';
+
+  pipCtx.fillStyle = bgColor;
+  pipCtx.fillRect(0, 0, width, height);
+
+  pipCtx.fillStyle = '#ffffff';
+  pipCtx.font = 'bold 26px Pretendard, sans-serif';
+  pipCtx.textAlign = 'center';
+  pipCtx.fillText(currentMode, width / 2, 54);
+
+  pipCtx.font = 'bold 74px Pretendard, sans-serif';
+  pipCtx.fillText(formatTime(intervalSecondsLeft), width / 2, 160);
+
+  pipCtx.font = 'bold 22px Pretendard, sans-serif';
+  pipCtx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  pipCtx.fillText(`Set ${setCount} / ${settings.sets}`, width / 2, 225);
+
+  pipCtx.font = '16px Pretendard, sans-serif';
+  pipCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  pipCtx.fillText(`Total ${formatTime(totalSeconds)}`, width / 2, 262);
+}
+
+function updatePipUI() {
+  if (!pipBtn) return;
+  const isPiPActive = !!(document.pictureInPictureElement && document.pictureInPictureElement === pipVideo);
+  if (isPiPActive) {
+    pipBtn.classList.add('active');
+  } else {
+    pipBtn.classList.remove('active');
+  }
+}
+
+async function togglePictureInPicture() {
+  if (!document.pictureInPictureEnabled || !pipVideo || !pipCanvas) {
+    alert('Picture-in-Picture mode is not supported by your browser.');
+    return;
+  }
+
+  try {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+    } else {
+      renderPipCanvas();
+      if (!pipStream && pipCanvas.captureStream) {
+        pipStream = pipCanvas.captureStream(10);
+        pipVideo.srcObject = pipStream;
+      }
+      await pipVideo.play();
+      await pipVideo.requestPictureInPicture();
+    }
+  } catch (err) {
+    console.warn('PiP error:', err);
+  }
+}
+
+if (pipBtn) {
+  if (!document.pictureInPictureEnabled) {
+    pipBtn.style.display = 'none';
+  } else {
+    pipBtn.onclick = togglePictureInPicture;
+  }
+}
+
+if (pipVideo) {
+  pipVideo.addEventListener('enterpictureinpicture', updatePipUI);
+  pipVideo.addEventListener('leavepictureinpicture', updatePipUI);
+}
+
+function updateMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+
+  try {
+    const modeEmoji = currentMode === 'RUN' ? '🔥' : currentMode === 'WALK' ? '💧' : '🌱';
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: `${modeEmoji} [${currentMode}] ${formatTime(intervalSecondsLeft)}`,
+      artist: `세트 ${setCount} / ${settings.sets}`,
+      album: '러닝머신 인터벌 타이머'
+    });
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      if (!isRunning) toggleBtn.click();
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      if (isRunning) toggleBtn.click();
+    });
+  } catch (err) {
+    console.warn('MediaSession error:', err);
+  }
+}
+
 function updateDisplay() {
   intervalTimeEl.textContent = formatTime(intervalSecondsLeft);
   totalTimeEl.textContent = `Total ${formatTime(totalSeconds)}`;
   setCountEl.textContent = `Set ${setCount}`;
   statusEl.textContent = currentMode;
   statusEl.className = `status ${currentMode}`;
+
+  updateProgressRing();
+  updateThemeClass();
+  renderPipCanvas();
+  updateMediaSession();
 }
 
 function updateToggle() {
   toggleBtn.textContent = isRunning ? 'PAUSE' : 'START';
-  toggleBtn.style.background = isRunning ? '#ffaa00' : '#00ff99';
+  if (isRunning) {
+    toggleBtn.style.background = 'rgba(255, 255, 255, 0.15)';
+    toggleBtn.style.color = '#ffffff';
+    toggleBtn.style.boxShadow = 'none';
+  } else {
+    toggleBtn.style.background = 'var(--theme-color)';
+    toggleBtn.style.color = '#000000';
+    toggleBtn.style.boxShadow = '0 4px 20px var(--theme-glow)';
+  }
 }
 
 // helpers
@@ -174,24 +379,111 @@ function formatYYYYMMDD(d) {
   return `${y}-${m}-${day}`;
 }
 
-function exportCalendar() {
-  return JSON.stringify(loadRunLogs());
-}
+function calculateStreak() {
+  const logs = loadRunLogs();
+  const today = new Date();
+  let count = 0;
 
-function importCalendar(data) {
-  let logs = data;
-  if (typeof logs === 'string') {
-    try {
-      logs = JSON.parse(logs);
-    } catch {
-      return false;
+  let checkDate = new Date(today);
+  let checkStr = formatYYYYMMDD(checkDate);
+
+  const todayEntry = logs[checkStr];
+  const isTodayLogged = todayEntry && (todayEntry.completed || todayEntry.stamp || Number(todayEntry.timeSec) > 0 || Number(todayEntry.distanceKm) > 0);
+  if (!isTodayLogged) {
+    checkDate.setDate(checkDate.getDate() - 1);
+    checkStr = formatYYYYMMDD(checkDate);
+  }
+
+  while (logs[checkStr]) {
+    const entry = logs[checkStr];
+    if (entry.completed || entry.stamp || Number(entry.timeSec) > 0 || Number(entry.distanceKm) > 0) {
+      count++;
+      checkDate.setDate(checkDate.getDate() - 1);
+      checkStr = formatYYYYMMDD(checkDate);
+    } else {
+      break;
     }
   }
-  if (!logs || typeof logs !== 'object' || Array.isArray(logs)) return false;
+
+  return count;
+}
+
+function updateStreakUI() {
+  const streakEl = document.getElementById('streakCounter');
+  if (!streakEl) return;
+  const streak = calculateStreak();
+  streakEl.textContent = `🔥 ${streak}일 연속 러닝!`;
+}
+
+function autoStampCompletedRun() {
+  const todayStr = formatYYYYMMDD(new Date());
+  const logs = loadRunLogs();
+  const entry = logs[todayStr] || {};
+  entry.completed = true;
+  entry.stamp = '🏃';
+  if (!entry.timeSec) {
+    entry.timeSec = totalSeconds || (settings.run * settings.sets);
+  }
+  logs[todayStr] = entry;
   saveRunLogs(logs);
   safeRenderCalendar();
   updateSummaries();
-  return true;
+  updateStreakUI();
+}
+
+function exportCalendar() {
+  const backup = {
+    app: "IntervalTimerPWA",
+    version: "2.0",
+    exportedAt: new Date().toISOString(),
+    runLogs: loadRunLogs(),
+    customPresets: typeof getCustomPresets === 'function' ? getCustomPresets() : [],
+    settings: settings
+  };
+  return JSON.stringify(backup, null, 2);
+}
+
+function importCalendar(data) {
+  let parsed = data;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch (err) {
+      console.error('Import JSON parse error:', err);
+      return false;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+
+  try {
+    const runLogs = parsed.runLogs || (typeof parsed === 'object' && !parsed.customPresets && !parsed.settings ? parsed : null);
+    if (runLogs && typeof runLogs === 'object' && !Array.isArray(runLogs)) {
+      const existing = loadRunLogs();
+      const merged = { ...existing, ...runLogs };
+      saveRunLogs(merged);
+    }
+
+    if (Array.isArray(parsed.customPresets) && typeof saveCustomPresets === 'function') {
+      saveCustomPresets(parsed.customPresets);
+      if (typeof renderPresetChips === 'function') renderPresetChips();
+    }
+
+    if (parsed.settings && typeof parsed.settings === 'object') {
+      if (parsed.settings.run) localStorage.setItem('runSec', parsed.settings.run);
+      if (parsed.settings.walk) localStorage.setItem('walkSec', parsed.settings.walk);
+      if (parsed.settings.sets) localStorage.setItem('setCount', parsed.settings.sets);
+      if (parsed.settings.warmup) localStorage.setItem('warmupSec', parsed.settings.warmup);
+      if (parsed.settings.finish) localStorage.setItem('finishSec', parsed.settings.finish);
+    }
+
+    safeRenderCalendar();
+    updateSummaries();
+    updateStreakUI();
+    return true;
+  } catch (err) {
+    console.error('importCalendar error:', err);
+    return false;
+  }
 }
 
 window.exportCalendar = exportCalendar;
@@ -237,6 +529,7 @@ function cancelCalendarBtnLongPress() {
 function openCalendar() {
   hideCalendarExportImport();
   ensureCalendarMarkup(); // make sure DOM refs and handlers exist
+  updateStreakUI();
   // Ensure calendar shows current month and select today's date
   const today = new Date();
   calDate = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -403,11 +696,11 @@ function ensureCalendarMarkup() {
   if (exportCalendarBtn) {
     exportCalendarBtn.onclick = () => {
       const payload = exportCalendar();
-      const blob = new Blob([payload], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'interval-timer-calendar.txt';
+      a.download = 'interval-timer-backup.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -512,6 +805,11 @@ function renderCalendar(year, month) {
 
       const entry = logs[dateStr];
       if (entry) {
+        const isRunCompleted = entry.completed || entry.stamp || Number(entry.timeSec) > 0 || Number(entry.distanceKm) > 0;
+        if (isRunCompleted) {
+          dayEl.classList.add('completed-stamp');
+        }
+
         // set the placeholder badge text (keeps consistent cell height)
         const gymBadgeEl = dayEl.querySelector('.gym-badge');
         if (gymBadgeEl) {
@@ -526,22 +824,29 @@ function renderCalendar(year, month) {
         const kmVal = (entry.distanceKm != null && entry.distanceKm !== '') ? formatDistanceDisplay(entry.distanceKm) : '';
         const minVal = entry.timeSec ? `${Math.round(Number(entry.timeSec) / 60)}m` : '';
 
-        if (kmVal || minVal) {
+        if (isRunCompleted || kmVal || minVal) {
           const rec = document.createElement('div');
           rec.className = 'day-record';
 
-          if (kmVal) {
+          if (isRunCompleted) {
+            const stampEl = document.createElement('div');
+            stampEl.className = 'stamp-icon';
+            stampEl.textContent = '🏃';
+            rec.appendChild(stampEl);
+          } else if (kmVal) {
             const kmEl = document.createElement('div');
             kmEl.className = 'km';
             kmEl.textContent = kmVal;
             rec.appendChild(kmEl);
           }
-          if (minVal) {
+
+          if (minVal && !isRunCompleted) {
             const minEl = document.createElement('div');
             minEl.className = 'min';
             minEl.textContent = minVal;
             rec.appendChild(minEl);
           }
+
           dayEl.appendChild(rec);
         }
       }
@@ -610,17 +915,77 @@ ensureCalendarMarkup();
   updateSummaries();
 })();
 
-/* SOUND */
-function playBeep(freq,dur) {
+/* MUTE & SOUND & VIBRATION */
+const muteBtn = document.getElementById('muteBtn');
+let isMuted = localStorage.getItem('isMuted') === 'true';
+
+function updateMuteUI() {
+  if (!muteBtn) return;
+  muteBtn.textContent = isMuted ? '🔇' : '🔊';
+  if (isMuted) {
+    muteBtn.classList.add('muted');
+  } else {
+    muteBtn.classList.remove('muted');
+  }
+}
+if (muteBtn) {
+  muteBtn.onclick = () => {
+    isMuted = !isMuted;
+    localStorage.setItem('isMuted', isMuted);
+    updateMuteUI();
+  };
+  updateMuteUI();
+}
+
+function triggerVibration(pattern) {
+  if (isMuted) return;
+  if ('vibrate' in navigator) {
+    try {
+      navigator.vibrate(pattern);
+    } catch (err) {}
+  }
+}
+
+function playBeep(freq, dur, type = 'sine') {
+  if (isMuted) return;
   if (!audioContext) return;
-  const o = audioContext.createOscillator();
-  const g = audioContext.createGain();
-  o.frequency.value = freq;
-  o.connect(g);
-  g.connect(audioContext.destination);
-  o.start();
-  g.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime+dur);
-  o.stop(audioContext.currentTime+dur);
+  try {
+    const o = audioContext.createOscillator();
+    const g = audioContext.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    o.connect(g);
+    g.connect(audioContext.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + dur);
+    o.stop(audioContext.currentTime + dur);
+  } catch (err) {
+    console.warn('playBeep error:', err);
+  }
+}
+
+function playCountdownBeep(secLeft) {
+  if (secLeft <= 3 && secLeft > 0) {
+    playBeep(660, 0.09, 'triangle');
+    triggerVibration([60]);
+  }
+}
+
+function playTransitionBeep(newMode) {
+  triggerVibration([200, 100, 200]);
+  if (newMode === 'RUN') {
+    playBeep(880, 0.15, 'sine');
+    setTimeout(() => playBeep(1046.5, 0.2, 'sine'), 120);
+  } else if (newMode === 'WALK') {
+    playBeep(523.25, 0.15, 'sine');
+    setTimeout(() => playBeep(392, 0.2, 'sine'), 120);
+  } else if (newMode === 'FINISH') {
+    playBeep(880, 0.15, 'sine');
+    setTimeout(() => playBeep(1174.66, 0.15, 'sine'), 150);
+    setTimeout(() => playBeep(1567.98, 0.35, 'sine'), 300);
+  } else if (newMode === 'WARMUP') {
+    playBeep(660, 0.15, 'sine');
+  }
 }
 
 /* INTERVAL / MODE SWITCH */
@@ -628,33 +993,34 @@ function switchMode() {
   if (currentMode === 'WARMUP') {
     currentMode = 'RUN';
     intervalSecondsLeft = settings.run;
-    playBeep(800,0.15);
     setCount = 1;
+    playTransitionBeep('RUN');
     return;
   }
 
   if (currentMode === 'RUN') {
     currentMode = 'WALK';
     intervalSecondsLeft = settings.walk;
-    playBeep(400,0.3);
+    playTransitionBeep('WALK');
   } else if (currentMode === 'WALK') {
     if (setCount >= settings.sets) {
       // 마지막 세트 끝 → FINISH
       currentMode = 'FINISH';
       intervalSecondsLeft = settings.finish;
-      playBeep(1000,0.5);
+      playTransitionBeep('FINISH');
+      autoStampCompletedRun();
     } else {
       currentMode = 'RUN';
       intervalSecondsLeft = settings.run;
       setCount++;
-      playBeep(800,0.15);
-      setTimeout(()=>playBeep(800,0.15),200);
+      playTransitionBeep('RUN');
     }
-  } else if (currentMode==='FINISH') {
+  } else if (currentMode === 'FINISH') {
     // 운동 끝, 자동 멈춤
-    isRunning=false;
-    clearInterval(timerId);
+    isRunning = false;
+    pauseTimerLoop();
     releaseWakeLock();
+    autoStampCompletedRun();
   }
 }
 
@@ -673,15 +1039,166 @@ function consumeElapsedSeconds(seconds) {
       totalSeconds += sec;
       intervalSecondsLeft -= sec;
       sec = 0;
+      playCountdownBeep(intervalSecondsLeft);
     }
   }
 }
 
+/* CUSTOM PRESETS ENGINE */
+const DEFAULT_PRESETS = [
+  { id: 'tabata', name: 'Tabata 20s/10s', warmup: 10, run: 20, walk: 10, finish: 10, sets: 8 },
+  { id: 'hiit30', name: 'HIIT 30s/30s', warmup: 30, run: 30, walk: 30, finish: 30, sets: 10 },
+  { id: 'run12', name: 'Run 1m / Walk 2m', warmup: 30, run: 60, walk: 120, finish: 60, sets: 5 }
+];
+
+function getCustomPresets() {
+  try {
+    const data = localStorage.getItem('customPresets');
+    if (!data) return DEFAULT_PRESETS;
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_PRESETS;
+  } catch (e) {
+    return DEFAULT_PRESETS;
+  }
+}
+
+function saveCustomPresets(presets) {
+  localStorage.setItem('customPresets', JSON.stringify(presets));
+}
+
+function applyPreset(preset) {
+  settings.run = preset.run;
+  settings.walk = preset.walk;
+  settings.sets = preset.sets;
+  settings.warmup = preset.warmup;
+  settings.finish = preset.finish;
+
+  localStorage.setItem('runSec', preset.run);
+  localStorage.setItem('walkSec', preset.walk);
+  localStorage.setItem('setCount', preset.sets);
+  localStorage.setItem('warmupSec', preset.warmup);
+  localStorage.setItem('finishSec', preset.finish);
+
+  runInput.value = preset.run;
+  walkInput.value = preset.walk;
+  setInput.value = preset.sets;
+  warmupInput.value = preset.warmup;
+  finishInput.value = preset.finish;
+
+  if (!isRunning) {
+    intervalSecondsLeft =
+      currentMode === 'RUN'
+        ? settings.run
+        : currentMode === 'WALK'
+        ? settings.walk
+        : currentMode === 'WARMUP'
+        ? settings.warmup
+        : settings.finish;
+    updateDisplay();
+  }
+  renderPresetChips();
+}
+
+function renderPresetChips() {
+  const container = document.getElementById('presetsList');
+  if (!container) return;
+  container.innerHTML = '';
+  const presets = getCustomPresets();
+
+  presets.forEach((preset) => {
+    const chip = document.createElement('div');
+    chip.className = 'preset-chip';
+
+    if (
+      settings.run === preset.run &&
+      settings.walk === preset.walk &&
+      settings.sets === preset.sets &&
+      settings.warmup === preset.warmup &&
+      settings.finish === preset.finish
+    ) {
+      chip.classList.add('active');
+    }
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'chip-name';
+    nameSpan.textContent = preset.name;
+    chip.appendChild(nameSpan);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'chip-delete-btn';
+    deleteBtn.textContent = '✕';
+    deleteBtn.ariaLabel = 'Delete preset';
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      deletePreset(preset.id);
+    };
+    chip.appendChild(deleteBtn);
+
+    chip.onclick = () => applyPreset(preset);
+    container.appendChild(chip);
+  });
+}
+
+function deletePreset(id) {
+  let presets = getCustomPresets();
+  presets = presets.filter((p) => p.id !== id);
+  saveCustomPresets(presets);
+  renderPresetChips();
+}
+
+function saveCurrentAsPreset() {
+  const defaultName = `Preset ${settings.run}s/${settings.walk}s`;
+  const name = prompt('Preset Name:', defaultName);
+  if (!name || !name.trim()) return;
+
+  const newPreset = {
+    id: 'preset-' + Date.now(),
+    name: name.trim(),
+    run: settings.run,
+    walk: settings.walk,
+    sets: settings.sets,
+    warmup: settings.warmup,
+    finish: settings.finish
+  };
+
+  const presets = getCustomPresets();
+  presets.push(newPreset);
+  saveCustomPresets(presets);
+  renderPresetChips();
+}
+
+const savePresetBtn = document.getElementById('savePresetBtn');
+if (savePresetBtn) {
+  savePresetBtn.onclick = saveCurrentAsPreset;
+}
+renderPresetChips();
+
 /* WAKE LOCK */
 async function requestWakeLock() {
-  try { wakeLock = await navigator.wakeLock.request('screen'); } catch{}
+  if (!('wakeLock' in navigator)) return;
+  try {
+    if (!wakeLock || wakeLock.released) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => {
+        wakeLock = null;
+      });
+    }
+  } catch (err) {
+    console.warn('Screen Wake Lock request failed:', err);
+    wakeLock = null;
+  }
 }
-function releaseWakeLock() { if(wakeLock) wakeLock.release(); wakeLock=null; }
+
+async function releaseWakeLock() {
+  if (wakeLock) {
+    try {
+      await wakeLock.release();
+    } catch (err) {
+      console.warn('Screen Wake Lock release failed:', err);
+    }
+    wakeLock = null;
+  }
+}
 
 document.addEventListener('visibilitychange', async ()=>{
   if (document.visibilityState === 'visible' && isRunning) {
@@ -701,37 +1218,26 @@ document.addEventListener('visibilitychange', async ()=>{
 toggleBtn.onclick = async ()=>{
   if(!isRunning){
     if(!audioContext) audioContext=new (window.AudioContext || window.webkitAudioContext)();
+    if(audioContext && audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
 
     await requestWakeLock();
     isRunning=true;
-
-    // use a short poll (500ms) but base all progress on wall-clock time
-    lastTick = Date.now();
-    const TICK_MS = 500;
-    timerId = setInterval(()=>{
-      const now = Date.now();
-      let elapsedMs = now - lastTick;
-      if (elapsedMs < 0) elapsedMs = 0;
-      const elapsedSec = Math.floor(elapsedMs / 1000);
-      if (elapsedSec >= 1) {
-        lastTick += elapsedSec * 1000;
-        consumeElapsedSeconds(elapsedSec);
-        updateDisplay();
-      }
-    }, TICK_MS);
+    startTimerLoop();
   }else{
     isRunning=false;
-    clearInterval(timerId);
-    releaseWakeLock();
+    pauseTimerLoop();
+    await releaseWakeLock();
   }
   updateToggle();
 };
 
 /* RESET */
-resetBtn.onclick = ()=>{
+resetBtn.onclick = async ()=>{
   isRunning=false;
-  clearInterval(timerId);
-  releaseWakeLock();
+  resetTimerLoop();
+  await releaseWakeLock();
 
   totalSeconds=0;
   setCount=1;
@@ -759,6 +1265,7 @@ runInput.addEventListener('change', () => {
   settings.run = v;
   localStorage.setItem('runSec', v);
   if (!isRunning && currentMode === 'RUN') { intervalSecondsLeft = v; updateDisplay(); }
+  renderPresetChips();
 });
 walkInput.addEventListener('change', () => {
   const v = Math.max(1, Number(walkInput.value) || 1);
@@ -766,12 +1273,14 @@ walkInput.addEventListener('change', () => {
   settings.walk = v;
   localStorage.setItem('walkSec', v);
   if (!isRunning && currentMode === 'WALK') { intervalSecondsLeft = v; updateDisplay(); }
+  renderPresetChips();
 });
 setInput.addEventListener('change', () => {
   const v = Math.max(1, Math.floor(Number(setInput.value) || 1));
   setInput.value = v;
   settings.sets = v;
   localStorage.setItem('setCount', v);
+  renderPresetChips();
 });
 warmupInput.addEventListener('change', () => {
   const v = Math.max(0, Number(warmupInput.value) || 0);
@@ -779,6 +1288,7 @@ warmupInput.addEventListener('change', () => {
   settings.warmup = v;
   localStorage.setItem('warmupSec', v);
   if (!isRunning && currentMode === 'WARMUP') { intervalSecondsLeft = v; updateDisplay(); }
+  renderPresetChips();
 });
 finishInput.addEventListener('change', () => {
   const v = Math.max(0, Number(finishInput.value) || 0);
@@ -786,6 +1296,7 @@ finishInput.addEventListener('change', () => {
   settings.finish = v;
   localStorage.setItem('finishSec', v);
   if (!isRunning && currentMode === 'FINISH') { intervalSecondsLeft = v; updateDisplay(); }
+  renderPresetChips();
 });
 
 /* CALENDAR (날짜별 런 기록) */
