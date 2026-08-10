@@ -1270,40 +1270,65 @@ document.addEventListener('touchend', function (e) {
   _lastTouchEnd = now;
 }, { passive: false });
 
-/* Touch Swipe Gestures (Swipe Left -> Open Calendar, Swipe Right -> Close Calendar) */
-let touchStartX = 0;
-let touchStartY = 0;
+/* Universal Pointer & Touch Swipe Gestures (PC Mouse Drag & Mobile Touch Swipe) */
+let pointerStartX = 0;
+let pointerStartY = 0;
+let pointerStartTime = 0;
+let isPointerDragging = false;
 
-document.addEventListener('touchstart', (e) => {
-  if (e.touches && e.touches.length === 1) {
-    const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'TEXTAREA' || t.closest('.controls') || t.closest('.stepper-box') || t.closest('.quick-adjust-bar') || t.closest('.presets-chips-container'))) {
-      touchStartX = 0;
-      touchStartY = 0;
-      return;
-    }
-    touchStartX = e.touches[0].clientX;
-    touchStartY = e.touches[0].clientY;
+document.addEventListener('pointerdown', (e) => {
+  if (e.isPrimary === false) return;
+
+  const t = e.target;
+  // Exclude interactive form inputs, buttons, sliders, or specific clickable items
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'TEXTAREA' || t.closest('.step-btn') || t.closest('.preset-chip') || t.closest('.quick-adj-btn') || t.closest('.chip-delete-btn'))) {
+    isPointerDragging = false;
+    pointerStartX = 0;
+    pointerStartY = 0;
+    return;
   }
+
+  pointerStartX = e.clientX;
+  pointerStartY = e.clientY;
+  pointerStartTime = Date.now();
+  isPointerDragging = true;
 }, { passive: true });
 
-document.addEventListener('touchend', (e) => {
-  if (!touchStartX || !touchStartY || !e.changedTouches || e.changedTouches.length === 0) return;
+document.addEventListener('pointerup', (e) => {
+  if (!isPointerDragging || !pointerStartX || !pointerStartY) {
+    isPointerDragging = false;
+    return;
+  }
 
-  const deltaX = e.changedTouches[0].clientX - touchStartX;
-  const deltaY = e.changedTouches[0].clientY - touchStartY;
+  const deltaX = e.clientX - pointerStartX;
+  const deltaY = e.clientY - pointerStartY;
+  const duration = Date.now() - pointerStartTime;
 
-  touchStartX = 0;
-  touchStartY = 0;
+  pointerStartX = 0;
+  pointerStartY = 0;
+  isPointerDragging = false;
 
-  if (Math.abs(deltaX) >= 50 && Math.abs(deltaY) < 40) {
+  // Swipe gesture criteria:
+  // 1. Duration <= 700ms
+  // 2. Horizontal movement abs(deltaX) >= 35px
+  // 3. Dominant horizontal direction: abs(deltaX) > abs(deltaY) * 1.1
+  if (duration <= 700 && Math.abs(deltaX) >= 35 && Math.abs(deltaX) > Math.abs(deltaY) * 1.1) {
     const isCalendarOpen = calendarEl && calendarEl.classList.contains('open');
     const isSettingsOpen = settingsEl && settingsEl.classList.contains('open');
 
-    if (deltaX <= -50 && !isCalendarOpen && !isSettingsOpen) {
+    // Swipe Left (deltaX <= -35): Open Calendar
+    if (deltaX <= -35 && !isCalendarOpen && !isSettingsOpen) {
       openCalendar();
-    } else if (deltaX >= 50 && isCalendarOpen) {
+    }
+    // Swipe Right (deltaX >= 35): Close Calendar if calendar is open
+    else if (deltaX >= 35 && isCalendarOpen) {
       closeCalendar();
     }
   }
+}, { passive: true });
+
+document.addEventListener('pointercancel', () => {
+  isPointerDragging = false;
+  pointerStartX = 0;
+  pointerStartY = 0;
 }, { passive: true });

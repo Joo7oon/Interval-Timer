@@ -1,30 +1,19 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width,
-             initial-scale=1,
-             maximum-scale=1,
-             user-scalable=no"
-  />
-  <link rel="manifest" href="manifest.json">
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/service-worker.js')
-        .then(() => console.log('Service Worker registered'))
-        .catch(console.error);
-    });
-  }
-</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>러닝머신 인터벌 타이머 PWA</title>
 
-  <title>Interval Timer</title>
-  <link rel="apple-touch-icon" href="icon-192.png">
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <!-- Pretendard Modern Web Font -->
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+
+  <!-- PWA Settings -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="theme-WARMUP">
@@ -94,58 +83,67 @@
     <div id="presetsList" class="presets-chips-container"></div>
   </div>
 
-<!-- WARMUP / FINISH -->
-<div class="settings-group">
-  <div class="settings-group-title">Prep & Finish</div>
-  <div class="setting-item">
-    <label>WARMUP (sec)</label>
-    <div class="stepper-box">
-      <button type="button" class="step-btn" data-target="warmupInput" data-step="-5">-</button>
-      <input id="warmupInput" type="number" min="0" />
-      <button type="button" class="step-btn" data-target="warmupInput" data-step="5">+</button>
+  <!-- WARMUP / FINISH -->
+  <div class="settings-group">
+    <div class="settings-group-title">Prep & Finish</div>
+    <div class="setting-item">
+      <label>WARMUP (sec)</label>
+      <div class="stepper-box">
+        <button type="button" class="step-btn" data-target="warmupInput" data-step="-5">-</button>
+        <input id="warmupInput" type="number" min="0" />
+        <button type="button" class="step-btn" data-target="warmupInput" data-step="5">+</button>
+      </div>
+    </div>
+    <div class="setting-item">
+      <label>FINISH (sec)</label>
+      <div class="stepper-box">
+        <button type="button" class="step-btn" data-target="finishInput" data-step="-5">-</button>
+        <input id="finishInput" type="number" min="0" />
+        <button type="button" class="step-btn" data-target="finishInput" data-step="5">+</button>
+      </div>
     </div>
   </div>
-  <div class="setting-item">
-    <label>FINISH (sec)</label>
-    <div class="stepper-box">
-      <button type="button" class="step-btn" data-target="finishInput" data-step="-5">-</button>
-      <input id="finishInput" type="number" min="0" />
-      <button type="button" class="step-btn" data-target="finishInput" data-step="5">+</button>
-    </div>
-  </div>
-</div>
 
   <!-- MAIN INTERVAL SETTINGS -->
-<div class="settings-group">
-  <div class="settings-group-title">Interval</div>
-  <div class="setting-item">
-    <label>RUN (sec)</label>
-    <div class="stepper-box">
-      <button type="button" class="step-btn" data-target="runInput" data-step="-5">-</button>
-      <input id="runInput" type="number" min="1" />
-      <button type="button" class="step-btn" data-target="runInput" data-step="5">+</button>
+  <div class="settings-group">
+    <div class="settings-group-title">Interval</div>
+    <div class="setting-item">
+      <label>RUN (sec)</label>
+      <div class="stepper-box">
+        <button type="button" class="step-btn" data-target="runInput" data-step="-5">-</button>
+        <input id="runInput" type="number" min="1" />
+        <button type="button" class="step-btn" data-target="runInput" data-step="5">+</button>
+      </div>
+    </div>
+    <div class="setting-item">
+      <label>WALK (sec)</label>
+      <div class="stepper-box">
+        <button type="button" class="step-btn" data-target="walkInput" data-step="-5">-</button>
+        <input id="walkInput" type="number" min="1" />
+        <button type="button" class="step-btn" data-target="walkInput" data-step="5">+</button>
+      </div>
+    </div>
+    <div class="setting-item">
+      <label>Set Count</label>
+      <div class="stepper-box">
+        <button type="button" class="step-btn" data-target="setInput" data-step="-1">-</button>
+        <input id="setInput" type="number" min="1" />
+        <button type="button" class="step-btn" data-target="setInput" data-step="1">+</button>
+      </div>
     </div>
   </div>
-  <div class="setting-item">
-    <label>WALK (sec)</label>
-    <div class="stepper-box">
-      <button type="button" class="step-btn" data-target="walkInput" data-step="-5">-</button>
-      <input id="walkInput" type="number" min="1" />
-      <button type="button" class="step-btn" data-target="walkInput" data-step="5">+</button>
+
+  <!-- DATA & BACKUP SECTION -->
+  <div class="settings-group">
+    <div class="settings-group-title">Data & Backup</div>
+    <div id="calendarExportImport" class="backup-sub-controls">
+      <button id="exportCalendarBtn" type="button" class="backup-btn">JSON EXPORT</button>
+      <button id="importCalendarBtn" type="button" class="backup-btn">JSON IMPORT</button>
     </div>
   </div>
-  <div class="setting-item">
-    <label>Set Count</label>
-    <div class="stepper-box">
-      <button type="button" class="step-btn" data-target="setInput" data-step="-1">-</button>
-      <input id="setInput" type="number" min="1" />
-      <button type="button" class="step-btn" data-target="setInput" data-step="1">+</button>
-    </div>
-  </div>
-</div>
 </div>
 
-<!-- CALENDAR PANEL -->
+<!-- CALENDAR PANEL (Full-Height Right-to-Left Drawer) -->
 <div id="calendar" class="calendar" aria-hidden="true">
   <div class="calendar-header">
     <div class="calendar-nav">
@@ -191,14 +189,9 @@
         <button id="deleteRunBtn">DELETE</button>
       </div>
     </div>
-
-    <!-- ISOLATED JSON BACKUP SUB-CONTROLS AT BOTTOM -->
-    <div id="calendarExportImport" class="backup-sub-controls">
-      <button id="exportCalendarBtn" type="button" class="backup-btn">JSON EXPORT</button>
-      <button id="importCalendarBtn" type="button" class="backup-btn">JSON IMPORT</button>
-    </div>
   </div>
 </div>
+
 <canvas id="pipCanvas" width="300" height="300" style="display:none;"></canvas>
 <video id="pipVideo" autoplay muted playsinline style="display:none;"></video>
 <input id="importCalendarFile" type="file" accept=".txt,.json" style="display:none" />
