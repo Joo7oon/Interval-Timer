@@ -1,27 +1,67 @@
-/* ELEMENTS */
+/* ==========================================================================
+   Interval Timer & Treadmill Calendar PWA - Main Application (app.js)
+   ========================================================================== */
+
+/* ==========================================================================
+   1. STATE & CONSTANTS
+   ========================================================================== */
+function safeGetStorageNumber(key, fallback) {
+  try {
+    const val = Number(localStorage.getItem(key));
+    return Number.isFinite(val) && val > 0 ? val : fallback;
+  } catch (err) {
+    return fallback;
+  }
+}
+
+let settings = {
+  run: safeGetStorageNumber('runSec', 60),
+  walk: safeGetStorageNumber('walkSec', 120),
+  sets: safeGetStorageNumber('setCount', 4),
+  warmup: safeGetStorageNumber('warmupSec', 30),
+  finish: safeGetStorageNumber('finishSec', 60)
+};
+
+let totalSeconds = 0;
+let intervalSecondsLeft = settings.warmup;
+let currentMode = 'WARMUP'; // WARMUP, RUN, WALK, FINISH
+let setCount = 1;
+let isRunning = false;
+let timerId = null;
+let timerWorker = null;
+let audioContext = null;
+let wakeLock = null;
+let lastTick = 0;
+
+const RING_CIRCUMFERENCE = 2 * Math.PI * 125; // 785.398
+
+/* ==========================================================================
+   2. DOM ELEMENTS
+   ========================================================================== */
 const statusEl = document.getElementById('status');
 const intervalTimeEl = document.getElementById('intervalTime');
 const totalTimeEl = document.getElementById('totalTime');
 const setCountEl = document.getElementById('setCount');
+const setDotsEl = document.getElementById('setDots');
+const timerContainerEl = document.getElementById('timerContainer');
 
 const toggleBtn = document.getElementById('toggleBtn');
 const resetBtn = document.getElementById('resetBtn');
+const sub10Btn = document.getElementById('sub10Btn');
+const add10Btn = document.getElementById('add10Btn');
 
 const settingsBtn = document.getElementById('settingsBtn');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const settingsEl = document.getElementById('settings');
 const overlay = document.getElementById('overlay');
-
 const calendarBtn = document.getElementById('calendarBtn');
+const muteBtn = document.getElementById('muteBtn');
 
-// make calendar-related refs mutable so we can re-query / create them if they are missing
-let calendarEl, closeCalendarBtn, prevMonthBtn, nextMonthBtn, calendarMonthYear, calendarDaysEl, selectedDateLabel;
-let runTimeInput, runDistInput, saveRunBtn, deleteRunBtn, gymCheckbox;
-let calendarExportImportEl, exportCalendarBtn, importCalendarBtn, importCalendarFileInput;
-let importCalendarFileListenerAdded = false;
-let calendarBtnLongPressTimer = null;
-let calendarBtnLongPressTriggered = false;
-const CALENDAR_BTN_LONG_PRESS_MS = 700;
+const pipBtn = document.getElementById('pipBtn');
+const pipCanvas = document.getElementById('pipCanvas');
+const pipVideo = document.getElementById('pipVideo');
+let pipCtx = pipCanvas ? pipCanvas.getContext('2d') : null;
+let pipStream = null;
 
 const runInput = document.getElementById('runInput');
 const walkInput = document.getElementById('walkInput');
@@ -31,27 +71,16 @@ const finishInput = document.getElementById('finishInput');
 
 const weekSummaryEl = document.getElementById('weekSummary');
 const monthSummaryEl = document.getElementById('monthSummary');
+const savePresetBtn = document.getElementById('savePresetBtn');
+const presetsListEl = document.getElementById('presetsList');
 
-/* STATE */
-let settings = {
-  run: Number(localStorage.getItem('runSec')) || 60,
-  walk: Number(localStorage.getItem('walkSec')) || 120,
-  sets: Number(localStorage.getItem('setCount')) || 4,
-  warmup: Number(localStorage.getItem('warmupSec')) || 30,
-  finish: Number(localStorage.getItem('finishSec')) || 60
-};
+let calendarEl, closeCalendarBtn, prevMonthBtn, nextMonthBtn, calendarMonthYear, calendarDaysEl, selectedDateLabel;
+let runTimeInput, runDistInput, saveRunBtn, deleteRunBtn, gymCheckbox;
+let calendarExportImportEl, exportCalendarBtn, importCalendarBtn, importCalendarFileInput;
 
-let totalSeconds = 0;
-let intervalSecondsLeft = settings.warmup;
-let currentMode = 'WARMUP';
-let setCount = 1;
-let isRunning = false;
-let timerId = null;
-let timerWorker = null;
-let audioContext = null;
-let wakeLock = null;
-let lastTick = 0; // ms timestamp used for accurate ticking
-
+/* ==========================================================================
+   3. WEB WORKER & TIMER ENGINE
+   ========================================================================== */
 function initTimerWorker() {
   if (window.Worker) {
     try {
@@ -114,44 +143,177 @@ function resetTimerLoop() {
   }
 }
 
-/* UTIL */
-function formatTime(sec) {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
+function switchMode() {
+  if (currentMode === 'WARMUP') {
+    currentMode = 'RUN';
+    intervalSecondsLeft = settings.run;
+    setCount = 1;
+    playTransitionBeep('RUN');
+    return;
+  }
 
-const progressCircle = document.getElementById('progressCircle');
-const RING_CIRCUMFERENCE = 2 * Math.PI * 125; // 785.398
-
-function getModeTotalSeconds(mode) {
-  switch (mode) {
-    case 'WARMUP': return settings.warmup || 1;
-    case 'RUN': return settings.run || 1;
-    case 'WALK': return settings.walk || 1;
-    case 'FINISH': return settings.finish || 1;
-    default: return 1;
+  if (currentMode === 'RUN') {
+    currentMode = 'WALK';
+    intervalSecondsLeft = settings.walk;
+    playTransitionBeep('WALK');
+  } else if (currentMode === 'WALK') {
+    if (setCount >= settings.sets) {
+      currentMode = 'FINISH';
+      intervalSecondsLeft = settings.finish;
+      playTransitionBeep('FINISH');
+      autoStampCompletedRun();
+    } else {
+      currentMode = 'RUN';
+      intervalSecondsLeft = settings.run;
+      setCount++;
+      playTransitionBeep('RUN');
+    }
+  } else if (currentMode === 'FINISH') {
+    isRunning = false;
+    pauseTimerLoop();
+    releaseWakeLock();
+    autoStampCompletedRun();
   }
 }
 
-function updateProgressRing() {
-  if (!progressCircle) return;
-  const total = getModeTotalSeconds(currentMode);
-  const ratio = Math.max(0, Math.min(1, intervalSecondsLeft / total));
-  const offset = RING_CIRCUMFERENCE * (1 - ratio);
-  progressCircle.style.strokeDashoffset = offset;
+function consumeElapsedSeconds(seconds) {
+  let sec = seconds;
+  while (sec > 0 && isRunning) {
+    if (sec >= intervalSecondsLeft) {
+      totalSeconds += intervalSecondsLeft;
+      sec -= intervalSecondsLeft;
+      intervalSecondsLeft = 0;
+      switchMode();
+      if (!isRunning) break;
+    } else {
+      totalSeconds += sec;
+      intervalSecondsLeft -= sec;
+      sec = 0;
+      playCountdownBeep(intervalSecondsLeft);
+    }
+  }
 }
 
-function updateThemeClass() {
-  document.body.className = `theme-${currentMode}`;
+/* ==========================================================================
+   4. SCREEN WAKE LOCK
+   ========================================================================== */
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    if (!wakeLock || wakeLock.released) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => {
+        wakeLock = null;
+      });
+    }
+  } catch (err) {
+    console.warn('Screen Wake Lock request failed:', err);
+    wakeLock = null;
+  }
 }
 
-const pipBtn = document.getElementById('pipBtn');
-const pipCanvas = document.getElementById('pipCanvas');
-const pipVideo = document.getElementById('pipVideo');
-let pipCtx = pipCanvas ? pipCanvas.getContext('2d') : null;
-let pipStream = null;
+async function releaseWakeLock() {
+  if (wakeLock) {
+    try {
+      await wakeLock.release();
+    } catch (err) {
+      console.warn('Screen Wake Lock release failed:', err);
+    }
+    wakeLock = null;
+  }
+}
 
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && isRunning) {
+    await requestWakeLock();
+    const now = Date.now();
+    const elapsedSec = lastTick ? Math.floor((now - lastTick) / 1000) : 0;
+    if (elapsedSec >= 1) {
+      lastTick = now;
+      consumeElapsedSeconds(elapsedSec);
+      updateDisplay();
+    }
+  }
+});
+
+/* ==========================================================================
+   5. AUDIO, VIBRATION & MUTE
+   ========================================================================== */
+let isMuted = localStorage.getItem('isMuted') === 'true';
+
+function updateMuteUI() {
+  if (!muteBtn) return;
+  muteBtn.textContent = isMuted ? '🔇' : '🔊';
+  if (isMuted) {
+    muteBtn.classList.add('muted');
+  } else {
+    muteBtn.classList.remove('muted');
+  }
+}
+
+if (muteBtn) {
+  muteBtn.onclick = () => {
+    isMuted = !isMuted;
+    localStorage.setItem('isMuted', isMuted);
+    updateMuteUI();
+  };
+  updateMuteUI();
+}
+
+function triggerVibration(pattern) {
+  if (isMuted) return;
+  if ('vibrate' in navigator) {
+    try {
+      navigator.vibrate(pattern);
+    } catch (err) {}
+  }
+}
+
+function playBeep(freq, dur, type = 'sine') {
+  if (isMuted) return;
+  if (!audioContext) return;
+  try {
+    const o = audioContext.createOscillator();
+    const g = audioContext.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    o.connect(g);
+    g.connect(audioContext.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + dur);
+    o.stop(audioContext.currentTime + dur);
+  } catch (err) {
+    console.warn('playBeep error:', err);
+  }
+}
+
+function playCountdownBeep(secLeft) {
+  if (secLeft <= 3 && secLeft > 0) {
+    playBeep(660, 0.09, 'triangle');
+    triggerVibration([60]);
+  }
+}
+
+function playTransitionBeep(newMode) {
+  triggerVibration([200, 100, 200]);
+  if (newMode === 'RUN') {
+    playBeep(880, 0.15, 'sine');
+    setTimeout(() => playBeep(1046.5, 0.2, 'sine'), 120);
+  } else if (newMode === 'WALK') {
+    playBeep(523.25, 0.15, 'sine');
+    setTimeout(() => playBeep(392, 0.2, 'sine'), 120);
+  } else if (newMode === 'FINISH') {
+    playBeep(880, 0.15, 'sine');
+    setTimeout(() => playBeep(1174.66, 0.15, 'sine'), 150);
+    setTimeout(() => playBeep(1567.98, 0.35, 'sine'), 300);
+  } else if (newMode === 'WARMUP') {
+    playBeep(660, 0.15, 'sine');
+  }
+}
+
+/* ==========================================================================
+   6. CANVAS PIP & MEDIA SESSION
+   ========================================================================== */
 function renderPipCanvas() {
   if (!pipCtx || !pipCanvas) return;
   const width = pipCanvas.width;
@@ -240,14 +402,70 @@ function updateMediaSession() {
     });
 
     navigator.mediaSession.setActionHandler('play', () => {
-      if (!isRunning) toggleBtn.click();
+      if (!isRunning && toggleBtn) toggleBtn.click();
     });
     navigator.mediaSession.setActionHandler('pause', () => {
-      if (isRunning) toggleBtn.click();
+      if (isRunning && toggleBtn) toggleBtn.click();
     });
   } catch (err) {
     console.warn('MediaSession error:', err);
   }
+}
+
+/* ==========================================================================
+   7. DISPLAY & UI UPDATES
+   ========================================================================== */
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function getModeTotalSeconds(mode) {
+  switch (mode) {
+    case 'WARMUP': return settings.warmup || 1;
+    case 'RUN': return settings.run || 1;
+    case 'WALK': return settings.walk || 1;
+    case 'FINISH': return settings.finish || 1;
+    default: return 1;
+  }
+}
+
+function updateProgressRing() {
+
+  const progressCircleEl = document.getElementById('progressCircle');
+  if (!progressCircleEl) return;
+  const total = getModeTotalSeconds(currentMode);
+  const ratio = Math.max(0, Math.min(1, intervalSecondsLeft / total));
+  const offset = RING_CIRCUMFERENCE * (1 - ratio);
+  progressCircleEl.style.strokeDashoffset = offset;
+}
+
+function updateSetDots() {
+  if (!setDotsEl) return;
+  const total = Math.max(1, settings.sets);
+  setDotsEl.innerHTML = '';
+  for (let i = 1; i <= total; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    if (i <= setCount && (currentMode === 'RUN' || currentMode === 'WALK' || currentMode === 'FINISH')) {
+      dot.classList.add('filled');
+    }
+    setDotsEl.appendChild(dot);
+  }
+}
+
+function updateVisualPulse() {
+  if (!timerContainerEl) return;
+  if (isRunning && intervalSecondsLeft <= 3 && intervalSecondsLeft > 0) {
+    timerContainerEl.classList.add('pulsing');
+  } else {
+    timerContainerEl.classList.remove('pulsing');
+  }
+}
+
+function updateThemeClass() {
+  document.body.className = `theme-${currentMode}`;
 }
 
 function updateDisplay() {
@@ -258,6 +476,8 @@ function updateDisplay() {
   statusEl.className = `status ${currentMode}`;
 
   updateProgressRing();
+  updateSetDots();
+  updateVisualPulse();
   updateThemeClass();
   renderPipCanvas();
   updateMediaSession();
@@ -276,775 +496,17 @@ function updateToggle() {
   }
 }
 
-// helpers
-function secToMMSS(sec = 0) {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
-function mmssToSec(str) {
-  if (!str) return 0;
-  const s = String(str).trim();
-  if (s.includes(':')) {
-    const [min, sec] = s.split(':').map(x => Number(x) || 0);
-    return Math.max(0, Math.floor(min) * 60 + Math.floor(sec));
-  }
-  // allow entering seconds directly
-  const n = Number(s);
-  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+function adjustIntervalTime(deltaSec) {
+  intervalSecondsLeft = Math.max(1, intervalSecondsLeft + deltaSec);
+  updateDisplay();
 }
 
-function getWeekRange(dateObj) {
-  const d = new Date(dateObj);
-  const day = d.getDay();
-  const start = new Date(d); start.setDate(d.getDate() - day); start.setHours(0,0,0,0);
-  const end = new Date(start); end.setDate(start.getDate() + 6); end.setHours(23,59,59,999);
-  return { start, end };
-}
-function getMonthRange(dateObj) {
-  const d = new Date(dateObj);
-  const start = new Date(d.getFullYear(), d.getMonth(), 1);
-  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0); end.setHours(23,59,59,999);
-  return { start, end };
-}
-
-function sumLogsBetween(startDate, endDate) {
-  const logs = loadRunLogs();
-  let time = 0, dist = 0;
-  for (const k of Object.keys(logs)) {
-    const t = new Date(k + 'T00:00:00');
-    if (t >= startDate && t <= endDate) {
-      const entry = logs[k] || {};
-      time += Number(entry.timeSec || 0);
-      dist += Number(entry.distanceKm || 0);
-    }
-  }
-  return { time, dist };
-}
-
-function updateSummaries(forDateObj) {
-  const ref = forDateObj ? new Date(forDateObj) : new Date();
-  const week = getWeekRange(ref);
-  const month = getMonthRange(ref);
-  const w = sumLogsBetween(week.start, week.end);
-  const m = sumLogsBetween(month.start, month.end);
-
-  weekSummaryEl.textContent = `Week: ${secToMMSS(w.time)} · ${w.dist.toFixed(2)} km`;
-  monthSummaryEl.textContent = `Month: ${secToMMSS(m.time)} · ${m.dist.toFixed(2)} km`;
-}
-
-/* SETTINGS PANEL */
-settingsBtn.onclick = () => {
-  settingsEl.classList.add('open');
-  overlay.classList.add('open');
-};
-
-function closeSettings() {
-  settingsEl.classList.remove('open');
-  overlay.classList.remove('open');
-
-  // 즉시 반영
-  if (!isRunning) {
-    intervalSecondsLeft =
-      currentMode === 'RUN'
-        ? settings.run
-        : currentMode === 'WALK'
-        ? settings.walk
-        : currentMode === 'WARMUP'
-        ? settings.warmup
-        : settings.finish;
-
-    updateDisplay();
-  }
-}
-
-closeSettingsBtn.onclick = closeSettings;
-// overlay.onclick = closeSettings;
-overlay.onclick = () => { closeSettings(); closeCalendar(); };
-
-/* CALENDAR (날짜별 런 기록) */
-/* calendar logic kept once later in the file */
-
-let calDate = new Date();
-let selectedDateStr = null;
-
-function loadRunLogs() { try { return JSON.parse(localStorage.getItem('runLogs') || '{}'); } catch { return {}; } }
-function saveRunLogs(obj) { localStorage.setItem('runLogs', JSON.stringify(obj)); }
-function getLogFor(dateStr) { return loadRunLogs()[dateStr] || null; }
-
-function formatYYYYMMDD(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
-}
-
-function calculateStreak() {
-  const logs = loadRunLogs();
-  const today = new Date();
-  let count = 0;
-
-  let checkDate = new Date(today);
-  let checkStr = formatYYYYMMDD(checkDate);
-
-  const todayEntry = logs[checkStr];
-  const isTodayLogged = todayEntry && (todayEntry.completed || todayEntry.stamp || Number(todayEntry.timeSec) > 0 || Number(todayEntry.distanceKm) > 0);
-  if (!isTodayLogged) {
-    checkDate.setDate(checkDate.getDate() - 1);
-    checkStr = formatYYYYMMDD(checkDate);
-  }
-
-  while (logs[checkStr]) {
-    const entry = logs[checkStr];
-    if (entry.completed || entry.stamp || Number(entry.timeSec) > 0 || Number(entry.distanceKm) > 0) {
-      count++;
-      checkDate.setDate(checkDate.getDate() - 1);
-      checkStr = formatYYYYMMDD(checkDate);
-    } else {
-      break;
-    }
-  }
-
-  return count;
-}
-
-function updateStreakUI() {
-  const streakEl = document.getElementById('streakCounter');
-  if (!streakEl) return;
-  const streak = calculateStreak();
-  streakEl.textContent = `🔥 ${streak}일 연속 러닝!`;
-}
-
-function autoStampCompletedRun() {
-  const todayStr = formatYYYYMMDD(new Date());
-  const logs = loadRunLogs();
-  const entry = logs[todayStr] || {};
-  entry.completed = true;
-  entry.stamp = '🏃';
-  if (!entry.timeSec) {
-    entry.timeSec = totalSeconds || (settings.run * settings.sets);
-  }
-  logs[todayStr] = entry;
-  saveRunLogs(logs);
-  safeRenderCalendar();
-  updateSummaries();
-  updateStreakUI();
-}
-
-function exportCalendar() {
-  const backup = {
-    app: "IntervalTimerPWA",
-    version: "2.0",
-    exportedAt: new Date().toISOString(),
-    runLogs: loadRunLogs(),
-    customPresets: typeof getCustomPresets === 'function' ? getCustomPresets() : [],
-    settings: settings
-  };
-  return JSON.stringify(backup, null, 2);
-}
-
-function importCalendar(data) {
-  let parsed = data;
-  if (typeof parsed === 'string') {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch (err) {
-      console.error('Import JSON parse error:', err);
-      return false;
-    }
-  }
-  if (!parsed || typeof parsed !== 'object') return false;
-
-  try {
-    const runLogs = parsed.runLogs || (typeof parsed === 'object' && !parsed.customPresets && !parsed.settings ? parsed : null);
-    if (runLogs && typeof runLogs === 'object' && !Array.isArray(runLogs)) {
-      const existing = loadRunLogs();
-      const merged = { ...existing, ...runLogs };
-      saveRunLogs(merged);
-    }
-
-    if (Array.isArray(parsed.customPresets) && typeof saveCustomPresets === 'function') {
-      saveCustomPresets(parsed.customPresets);
-      if (typeof renderPresetChips === 'function') renderPresetChips();
-    }
-
-    if (parsed.settings && typeof parsed.settings === 'object') {
-      if (parsed.settings.run) localStorage.setItem('runSec', parsed.settings.run);
-      if (parsed.settings.walk) localStorage.setItem('walkSec', parsed.settings.walk);
-      if (parsed.settings.sets) localStorage.setItem('setCount', parsed.settings.sets);
-      if (parsed.settings.warmup) localStorage.setItem('warmupSec', parsed.settings.warmup);
-      if (parsed.settings.finish) localStorage.setItem('finishSec', parsed.settings.finish);
-    }
-
-    safeRenderCalendar();
-    updateSummaries();
-    updateStreakUI();
-    return true;
-  } catch (err) {
-    console.error('importCalendar error:', err);
-    return false;
-  }
-}
-
-window.exportCalendar = exportCalendar;
-window.importCalendar = importCalendar;
-
-function showCalendarExportImport() {
-  ensureCalendarMarkup();
-  hideCalendarExportImport();
-  if (calendarExportImportEl) {
-    calendarExportImportEl.style.display = 'flex';
-    calendarExportImportEl.setAttribute('aria-hidden', 'false');
-  }
-  if (calendarEl) {
-    calendarEl.classList.add('open');
-    calendarEl.setAttribute('aria-hidden','false');
-  }
-  if (overlay) overlay.classList.add('open');
-}
-
-function hideCalendarExportImport() {
-  if (calendarExportImportEl) {
-    calendarExportImportEl.style.display = 'none';
-    calendarExportImportEl.setAttribute('aria-hidden', 'true');
-  }
-}
-
-function startCalendarBtnLongPress() {
-  calendarBtnLongPressTriggered = false;
-  cancelCalendarBtnLongPress();
-  calendarBtnLongPressTimer = window.setTimeout(() => {
-    calendarBtnLongPressTriggered = true;
-    showCalendarExportImport();
-  }, CALENDAR_BTN_LONG_PRESS_MS);
-}
-
-function cancelCalendarBtnLongPress() {
-  if (calendarBtnLongPressTimer) {
-    window.clearTimeout(calendarBtnLongPressTimer);
-    calendarBtnLongPressTimer = null;
-  }
-}
-
-function openCalendar() {
-  hideCalendarExportImport();
-  ensureCalendarMarkup(); // make sure DOM refs and handlers exist
-  updateStreakUI();
-  // Ensure calendar shows current month and select today's date
-  const today = new Date();
-  calDate = new Date(today.getFullYear(), today.getMonth(), 1);
-  renderCalendar(calDate.getFullYear(), calDate.getMonth());
-  calendarEl.classList.add('open');
-  overlay.classList.add('open');
-  calendarEl.setAttribute('aria-hidden','false');
-  const todayStr = formatYYYYMMDD(today);
-  // mimic a user click on today's cell so we run the same handler
-  const todayCell = calendarDaysEl && calendarDaysEl.querySelector('.calendar-day[data-date="' + todayStr + '"]');
-  if (todayCell && typeof todayCell.click === 'function') {
-    todayCell.click();
-  } else {
-    // fallback to direct selection
-    selectDate(todayStr, today);
-  }
-}
-
-// show minutes value when selecting a date
-function formatDateLabel(dateObj) {
-  const y = dateObj.getFullYear();
-  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const d = String(dateObj.getDate()).padStart(2, '0');
-  return `${y}. ${m}. ${d}.`;
-}
-
-// when selecting a date show formatted label and remove placeholder style
-function selectDate(dateStr, dateObj) {
-  selectedDateStr = dateStr;
-  if (selectedDateLabel) {
-    selectedDateLabel.classList.remove('placeholder');
-    selectedDateLabel.textContent = formatDateLabel(dateObj);
-  }
-  const log = getLogFor(dateStr);
-  runTimeInput.value = log ? String(Math.round((log.timeSec || 0) / 60)) : '';
-  runDistInput.value = log && log.distanceKm != null ? log.distanceKm : '';
-  if (gymCheckbox) gymCheckbox.checked = !!(log && log.gym);
-  renderCalendar(calDate.getFullYear(), calDate.getMonth());
-  updateSummaries(dateObj);
-}
-
-// close should reset to placeholder (prevents layout jump)
-function closeCalendar() {
-  if (!calendarEl) calendarEl = document.getElementById('calendar');
-  if (!overlay) overlay = document.getElementById('overlay');
-
-  if (!calendarEl) return;
-  calendarEl.classList.remove('open');
-  if (overlay) overlay.classList.remove('open');
-  calendarEl.setAttribute('aria-hidden', 'true');
-  selectedDateStr = null;
-  if (selectedDateLabel) {
-    selectedDateLabel.classList.add('placeholder');
-    selectedDateLabel.textContent = 'yyyy. mm. dd.';
-  }
-  hideCalendarExportImport();
-}
-
-// ensureCalendarMarkup: after re-query set placeholder if empty
-function ensureCalendarMarkup() {
-  if (!document.getElementById('calendar')) {
-    const tpl = `
-      <div id="calendar" class="calendar" aria-hidden="true">
-        <div class="calendar-header">
-          <div class="calendar-nav">
-            <button id="prevMonthBtn" class="cal-nav" aria-label="Previous month">◀</button>
-            <div id="calendarMonthYear" class="calendar-month-year"></div>
-            <button id="nextMonthBtn" class="cal-nav" aria-label="Next month">▶</button>
-          </div>
-          <button id="closeCalendarBtn" class="settings-header-button" aria-label="Close calendar">✕</button>
-        </div>
-
-        <div class="calendar-grid">
-          <div class="calendar-weekdays">
-            <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-          </div>
-          <div id="calendarDays" class="calendar-days"></div>
-        </div>
-
-        <div id="calendarDetails" class="calendar-details">
-          <div id="selectedDateLabel" class="settings-group-title"></div>
-
-          <div class="calendar-summary">
-            <div id="weekSummary" class="calendar-summary-item">Week: 00:00 · 0.00 km</div>
-            <div id="monthSummary" class="calendar-summary-item">Month: 00:00 · 0.00 km</div>
-          </div>
-
-          <div class="setting-item">
-            <label>Run Time (min)</label>
-            <input id="runTimeInput" type="number" inputmode="numeric" min="0" step="1" placeholder="mm" />
-          </div>
-
-          <div class="setting-item">
-            <label>Run Distance (km)</label>
-            <!-- type="text" + inputmode="decimal" (no pattern) so iOS always allows '.' -->
-            <input id="runDistInput" type="text" inputmode="decimal" placeholder="0.00" />
-          </div>
-
-          <div class="setting-item">
-            <label for="gymCheckbox">Gym</label>
-            <div class="toggle" aria-hidden="false">
-              <input id="gymCheckbox" type="checkbox" />
-              <span class="toggle-slider" aria-hidden="true"></span>
-            </div>
-          </div>
-
-          <div class="controls">
-            <button id="saveRunBtn">SAVE</button>
-            <button id="deleteRunBtn">DELETE</button>
-          </div>
-        </div>
-      </div>
-    `;
-    // append to body before script tag so styles apply
-    document.body.insertAdjacentHTML('beforeend', tpl);
-  }
-
-  // re-query all calendar elements (now guaranteed to exist)
-  calendarEl = document.getElementById('calendar');
-  closeCalendarBtn = document.getElementById('closeCalendarBtn');
-  prevMonthBtn = document.getElementById('prevMonthBtn');
-  nextMonthBtn = document.getElementById('nextMonthBtn');
-  calendarMonthYear = document.getElementById('calendarMonthYear');
-  calendarDaysEl = document.getElementById('calendarDays');
-  selectedDateLabel = document.getElementById('selectedDateLabel');
-
-  runTimeInput = document.getElementById('runTimeInput');
-  runDistInput = document.getElementById('runDistInput');
-  saveRunBtn = document.getElementById('saveRunBtn');
-  deleteRunBtn = document.getElementById('deleteRunBtn');
-  gymCheckbox = document.getElementById('gymCheckbox');
-  calendarExportImportEl = document.getElementById('calendarExportImport');
-  exportCalendarBtn = document.getElementById('exportCalendarBtn');
-  importCalendarBtn = document.getElementById('importCalendarBtn');
-  importCalendarFileInput = document.getElementById('importCalendarFile');
-
-  // wire handlers (idempotent)
-  calendarBtn.onclick = () => {
-    if (!calendarBtnLongPressTriggered) {
-      openCalendar();
-    }
-    calendarBtnLongPressTriggered = false;
-  };
-  calendarBtn.addEventListener('pointerdown', startCalendarBtnLongPress);
-  calendarBtn.addEventListener('pointerup', cancelCalendarBtnLongPress);
-  calendarBtn.addEventListener('pointerleave', cancelCalendarBtnLongPress);
-  calendarBtn.addEventListener('pointercancel', cancelCalendarBtnLongPress);
-
-  closeCalendarBtn.onclick = () => {
-    closeCalendar();
-    hideCalendarExportImport();
-  };
-  prevMonthBtn.onclick = () => {
-    calDate = new Date(calDate.getFullYear(), calDate.getMonth() - 1, 1);
-    safeRenderCalendar();
-  };
-  nextMonthBtn.onclick = () => {
-    calDate = new Date(calDate.getFullYear(), calDate.getMonth() + 1, 1);
-    safeRenderCalendar();
-  };
-  saveRunBtn.onclick = saveRunBtnHandler;
-  deleteRunBtn.onclick = deleteRunBtnHandler;
-
-  if (exportCalendarBtn) {
-    exportCalendarBtn.onclick = () => {
-      const payload = exportCalendar();
-      const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'interval-timer-backup.json';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    };
-  }
-  if (importCalendarBtn) {
-    importCalendarBtn.onclick = () => {
-      if (!importCalendarFileInput) return;
-      importCalendarFileInput.value = '';
-      importCalendarFileInput.click();
-    };
-  }
-  if (importCalendarFileInput && !importCalendarFileListenerAdded) {
-    importCalendarFileListenerAdded = true;
-    importCalendarFileInput.addEventListener('change', (event) => {
-      const file = event.target.files && event.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const text = reader.result;
-        if (!importCalendar(text)) {
-          alert('Import failed.');
-          return;
-        }
-        alert('Calendar data imported.');
-        hideCalendarExportImport();
-      };
-      reader.readAsText(file);
-    });
-  }
-
-  // ensure gym checkbox exists and doesn't break tabbing; auto-save on change
-  if (gymCheckbox) {
-    gymCheckbox.checked = false;
-    gymCheckbox.addEventListener('change', () => {
-      // if a date is selected, save immediately for instant feedback
-      if (selectedDateStr) saveRunBtnHandler();
-    });
-  }
-}
-
-// small helper to show distance nicely
-function formatDistanceDisplay(d) {
-  if (d == null || d === '') return '';
-  const n = Number(d) || 0;
-  if (n >= 1000) return `${(n/1000).toFixed(1).replace(/\.0$/,'')}k`; // e.g. 1500 -> 1.5k
-  if (n >= 100) return `${Math.round(n)}km`; // 125 -> 125km (integer)
-  const s = n.toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
-  return `${s}km`; // e.g. 5.5km or 3km
-}
-
-/* RENDER CALENDAR - builds day cells and per-day record lines */
-function renderCalendar(year, month) {
-  if (!calendarDaysEl || !calendarMonthYear) {
-    console.warn('renderCalendar skipped: missing DOM refs');
-    return;
-  }
-
-  calDate = new Date(year, month, 1);
-  calendarMonthYear.textContent = calDate.toLocaleString(undefined, { month: 'long', year: 'numeric' });
-
-  calendarDaysEl.innerHTML = '';
-  const firstDay = new Date(year, month, 1);
-  const startDay = firstDay.getDay();
-  const daysInMonth = new Date(year, month+1, 0).getDate();
-  const prevMonthDays = new Date(year, month, 0).getDate();
-  const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
-  const logs = loadRunLogs();
-
-  for (let i = 0; i < totalCells; i++) {
-    const dayEl = document.createElement('div');
-    dayEl.className = 'calendar-day';
-    let cellDate, inThisMonth = true;
-
-    if (i < startDay) {
-      const d = prevMonthDays - (startDay - 1 - i);
-      dayEl.classList.add('other-month');
-      cellDate = new Date(year, month - 1, d);
-      inThisMonth = false;
-    } else if (i >= startDay + daysInMonth) {
-      const d = i - (startDay + daysInMonth) + 1;
-      dayEl.classList.add('other-month');
-      cellDate = new Date(year, month + 1, d);
-      inThisMonth = false;
-    } else {
-      const d = i - startDay + 1;
-      cellDate = new Date(year, month, d);
-    }
-
-    const dateStr = formatYYYYMMDD(cellDate);
-    // expose date on element so we can programmatically click it later
-    dayEl.setAttribute('data-date', dateStr);
-
-    // number + gym placeholder
-    dayEl.innerHTML = `<div class="day-number">${String(cellDate.getDate())}</div><div class="gym-badge" aria-hidden="true"></div>`;
-
-    if (!inThisMonth) {
-      dayEl.style.opacity = '0.45';
-    } else {
-      dayEl.onclick = () => selectDate(dateStr, cellDate);
-
-      const entry = logs[dateStr];
-      if (entry) {
-        const isRunCompleted = entry.completed || entry.stamp || Number(entry.timeSec) > 0 || Number(entry.distanceKm) > 0;
-        if (isRunCompleted) {
-          dayEl.classList.add('completed-stamp');
-        }
-
-        // set the placeholder badge text (keeps consistent cell height)
-        const gymBadgeEl = dayEl.querySelector('.gym-badge');
-        if (gymBadgeEl) {
-          if (entry.gym === true || entry.gym === 'true' || entry.gym === 1 || entry.gym === '1' || !!entry.gym) {
-            gymBadgeEl.textContent = 'GYM';
-            gymBadgeEl.classList.add('active');
-          } else {
-            gymBadgeEl.textContent = '';
-            gymBadgeEl.classList.remove('active');
-          }
-        }
-        const kmVal = (entry.distanceKm != null && entry.distanceKm !== '') ? formatDistanceDisplay(entry.distanceKm) : '';
-        const minVal = entry.timeSec ? `${Math.round(Number(entry.timeSec) / 60)}m` : '';
-
-        if (isRunCompleted || kmVal || minVal) {
-          const rec = document.createElement('div');
-          rec.className = 'day-record';
-
-          if (isRunCompleted) {
-            const stampEl = document.createElement('div');
-            stampEl.className = 'stamp-icon';
-            stampEl.textContent = '🏃';
-            rec.appendChild(stampEl);
-          } else if (kmVal) {
-            const kmEl = document.createElement('div');
-            kmEl.className = 'km';
-            kmEl.textContent = kmVal;
-            rec.appendChild(kmEl);
-          }
-
-          if (minVal && !isRunCompleted) {
-            const minEl = document.createElement('div');
-            minEl.className = 'min';
-            minEl.textContent = minVal;
-            rec.appendChild(minEl);
-          }
-
-          dayEl.appendChild(rec);
-        }
-      }
-    }
-
-    if (dateStr === selectedDateStr) dayEl.classList.add('selected');
-
-    calendarDaysEl.appendChild(dayEl);
-  }
-}
-
-/* Safe render wrapper to avoid uncaught exceptions if DOM missing for any reason */
-function safeRenderCalendar() {
-  try {
-    if (!calendarDaysEl) throw new Error('calendarDaysEl missing');
-    renderCalendar(calDate.getFullYear(), calDate.getMonth());
-  } catch (err) {
-    console.error('renderCalendar skipped:', err);
-  }
-}
-
-/* Extracted small handlers so we can hook them after ensureCalendarMarkup() */
-function saveRunBtnHandler() {
-  if (!selectedDateStr) return;
-  const minutes = Number(runTimeInput.value) || 0;
-  const timeSec = Math.max(0, Math.floor(minutes)) * 60;
-  const distanceKm = runDistInput && runDistInput.value !== '' ? Number(String(runDistInput.value).replace(',', '.')) : null;
-  const logs = loadRunLogs();
-  const gym = !!(gymCheckbox && gymCheckbox.checked); // ensure boolean
-  if (timeSec > 0 || (distanceKm !== null && distanceKm > 0) || gym) {
-    const entry = logs[selectedDateStr] || {};
-    entry.timeSec = timeSec;
-    entry.distanceKm = distanceKm;
-    entry.gym = gym;
-    logs[selectedDateStr] = entry;
-  } else {
-    delete logs[selectedDateStr];
-  }
-  saveRunLogs(logs);
-  console.log('Saved run log', selectedDateStr, logs[selectedDateStr]); // debug helper
-  if (gymCheckbox) gymCheckbox.checked = !!logs[selectedDateStr]?.gym;
-  safeRenderCalendar();
-  updateSummaries(new Date(selectedDateStr + 'T00:00:00'));
-}
-
-function deleteRunBtnHandler() {
-  if (!selectedDateStr) return;
-  const logs = loadRunLogs();
-  delete logs[selectedDateStr];
-  saveRunLogs(logs);
-  runTimeInput.value = '';
-  runDistInput.value = '';
-  if (gymCheckbox) gymCheckbox.checked = false;
-  safeRenderCalendar();
-  updateSummaries(new Date(selectedDateStr + 'T00:00:00'));
-}
-
-// ensure calendar exists before any calendar action
-ensureCalendarMarkup();
-
-// replace prior direct calls with safeRenderCalendar when needed
-(function initCalendar() {
-  const today = new Date();
-  calDate = new Date(today.getFullYear(), today.getMonth(), 1);
-  safeRenderCalendar();
-  updateSummaries();
-})();
-
-/* MUTE & SOUND & VIBRATION */
-const muteBtn = document.getElementById('muteBtn');
-let isMuted = localStorage.getItem('isMuted') === 'true';
-
-function updateMuteUI() {
-  if (!muteBtn) return;
-  muteBtn.textContent = isMuted ? '🔇' : '🔊';
-  if (isMuted) {
-    muteBtn.classList.add('muted');
-  } else {
-    muteBtn.classList.remove('muted');
-  }
-}
-if (muteBtn) {
-  muteBtn.onclick = () => {
-    isMuted = !isMuted;
-    localStorage.setItem('isMuted', isMuted);
-    updateMuteUI();
-  };
-  updateMuteUI();
-}
-
-function triggerVibration(pattern) {
-  if (isMuted) return;
-  if ('vibrate' in navigator) {
-    try {
-      navigator.vibrate(pattern);
-    } catch (err) {}
-  }
-}
-
-function playBeep(freq, dur, type = 'sine') {
-  if (isMuted) return;
-  if (!audioContext) return;
-  try {
-    const o = audioContext.createOscillator();
-    const g = audioContext.createGain();
-    o.type = type;
-    o.frequency.value = freq;
-    o.connect(g);
-    g.connect(audioContext.destination);
-    o.start();
-    g.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + dur);
-    o.stop(audioContext.currentTime + dur);
-  } catch (err) {
-    console.warn('playBeep error:', err);
-  }
-}
-
-function playCountdownBeep(secLeft) {
-  if (secLeft <= 3 && secLeft > 0) {
-    playBeep(660, 0.09, 'triangle');
-    triggerVibration([60]);
-  }
-}
-
-function playTransitionBeep(newMode) {
-  triggerVibration([200, 100, 200]);
-  if (newMode === 'RUN') {
-    playBeep(880, 0.15, 'sine');
-    setTimeout(() => playBeep(1046.5, 0.2, 'sine'), 120);
-  } else if (newMode === 'WALK') {
-    playBeep(523.25, 0.15, 'sine');
-    setTimeout(() => playBeep(392, 0.2, 'sine'), 120);
-  } else if (newMode === 'FINISH') {
-    playBeep(880, 0.15, 'sine');
-    setTimeout(() => playBeep(1174.66, 0.15, 'sine'), 150);
-    setTimeout(() => playBeep(1567.98, 0.35, 'sine'), 300);
-  } else if (newMode === 'WARMUP') {
-    playBeep(660, 0.15, 'sine');
-  }
-}
-
-/* INTERVAL / MODE SWITCH */
-function switchMode() {
-  if (currentMode === 'WARMUP') {
-    currentMode = 'RUN';
-    intervalSecondsLeft = settings.run;
-    setCount = 1;
-    playTransitionBeep('RUN');
-    return;
-  }
-
-  if (currentMode === 'RUN') {
-    currentMode = 'WALK';
-    intervalSecondsLeft = settings.walk;
-    playTransitionBeep('WALK');
-  } else if (currentMode === 'WALK') {
-    if (setCount >= settings.sets) {
-      // 마지막 세트 끝 → FINISH
-      currentMode = 'FINISH';
-      intervalSecondsLeft = settings.finish;
-      playTransitionBeep('FINISH');
-      autoStampCompletedRun();
-    } else {
-      currentMode = 'RUN';
-      intervalSecondsLeft = settings.run;
-      setCount++;
-      playTransitionBeep('RUN');
-    }
-  } else if (currentMode === 'FINISH') {
-    // 운동 끝, 자동 멈춤
-    isRunning = false;
-    pauseTimerLoop();
-    releaseWakeLock();
-    autoStampCompletedRun();
-  }
-}
-
-/* Handle consuming N whole seconds (may cross multiple modes) */
-function consumeElapsedSeconds(seconds) {
-  let sec = seconds;
-  while (sec > 0 && isRunning) {
-    if (sec >= intervalSecondsLeft) {
-      // consume to the end of this mode
-      totalSeconds += intervalSecondsLeft;
-      sec -= intervalSecondsLeft;
-      intervalSecondsLeft = 0;
-      switchMode();
-      if (!isRunning) break; // stopped at FINISH
-    } else {
-      totalSeconds += sec;
-      intervalSecondsLeft -= sec;
-      sec = 0;
-      playCountdownBeep(intervalSecondsLeft);
-    }
-  }
-}
-
-/* CUSTOM PRESETS ENGINE */
+if (sub10Btn) sub10Btn.onclick = () => adjustIntervalTime(-10);
+if (add10Btn) add10Btn.onclick = () => adjustIntervalTime(10);
+
+/* ==========================================================================
+   8. PRESET MANAGEMENT
+   ========================================================================== */
 const DEFAULT_PRESETS = [
   { id: 'tabata', name: 'Tabata 20s/10s', warmup: 10, run: 20, walk: 10, finish: 10, sets: 8 },
   { id: 'hiit30', name: 'HIIT 30s/30s', warmup: 30, run: 30, walk: 30, finish: 30, sets: 10 },
@@ -1063,7 +525,9 @@ function getCustomPresets() {
 }
 
 function saveCustomPresets(presets) {
-  localStorage.setItem('customPresets', JSON.stringify(presets));
+  try {
+    localStorage.setItem('customPresets', JSON.stringify(presets));
+  } catch (e) {}
 }
 
 function applyPreset(preset) {
@@ -1167,92 +631,553 @@ function saveCurrentAsPreset() {
   renderPresetChips();
 }
 
-const savePresetBtn = document.getElementById('savePresetBtn');
 if (savePresetBtn) {
   savePresetBtn.onclick = saveCurrentAsPreset;
 }
-renderPresetChips();
 
-/* WAKE LOCK */
-async function requestWakeLock() {
-  if (!('wakeLock' in navigator)) return;
+/* ==========================================================================
+   9. CALENDAR & ATTENDANCE LOGS
+   ========================================================================== */
+let calDate = new Date();
+let selectedDateStr = null;
+
+function loadRunLogs() {
   try {
-    if (!wakeLock || wakeLock.released) {
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => {
-        wakeLock = null;
-      });
-    }
+    return JSON.parse(localStorage.getItem('runLogs') || '{}');
   } catch (err) {
-    console.warn('Screen Wake Lock request failed:', err);
-    wakeLock = null;
+    return {};
   }
 }
 
-async function releaseWakeLock() {
-  if (wakeLock) {
+function saveRunLogs(obj) {
+  try {
+    localStorage.setItem('runLogs', JSON.stringify(obj));
+  } catch (err) {}
+}
+
+function getLogFor(dateStr) {
+  return loadRunLogs()[dateStr] || null;
+}
+
+function formatYYYYMMDD(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function secToMMSS(sec = 0) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function getWeekRange(dateObj) {
+  const d = new Date(dateObj);
+  const day = d.getDay();
+  const start = new Date(d); start.setDate(d.getDate() - day); start.setHours(0,0,0,0);
+  const end = new Date(start); end.setDate(start.getDate() + 6); end.setHours(23,59,59,999);
+  return { start, end };
+}
+
+function getMonthRange(dateObj) {
+  const d = new Date(dateObj);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0); end.setHours(23,59,59,999);
+  return { start, end };
+}
+
+function sumLogsBetween(startDate, endDate) {
+  const logs = loadRunLogs();
+  let time = 0, dist = 0;
+  for (const k of Object.keys(logs)) {
+    const t = new Date(k + 'T00:00:00');
+    if (t >= startDate && t <= endDate) {
+      const entry = logs[k] || {};
+      time += Number(entry.timeSec || 0);
+      dist += Number(entry.distanceKm || 0);
+    }
+  }
+  return { time, dist };
+}
+
+function updateSummaries(forDateObj) {
+  if (!weekSummaryEl || !monthSummaryEl) return;
+  const ref = forDateObj ? new Date(forDateObj) : new Date();
+  const week = getWeekRange(ref);
+  const month = getMonthRange(ref);
+  const w = sumLogsBetween(week.start, week.end);
+  const m = sumLogsBetween(month.start, month.end);
+
+  weekSummaryEl.textContent = `Week: ${secToMMSS(w.time)} · ${w.dist.toFixed(2)} km`;
+  monthSummaryEl.textContent = `Month: ${secToMMSS(m.time)} · ${m.dist.toFixed(2)} km`;
+}
+
+function calculateStreak() {
+  const logs = loadRunLogs();
+  const today = new Date();
+  let count = 0;
+
+  let checkDate = new Date(today);
+  let checkStr = formatYYYYMMDD(checkDate);
+
+  const todayEntry = logs[checkStr];
+  const isTodayLogged = todayEntry && (todayEntry.completed || todayEntry.stamp || Number(todayEntry.timeSec) > 0 || Number(todayEntry.distanceKm) > 0);
+  if (!isTodayLogged) {
+    checkDate.setDate(checkDate.getDate() - 1);
+    checkStr = formatYYYYMMDD(checkDate);
+  }
+
+  while (logs[checkStr]) {
+    const entry = logs[checkStr];
+    if (entry.completed || entry.stamp || Number(entry.timeSec) > 0 || Number(entry.distanceKm) > 0) {
+      count++;
+      checkDate.setDate(checkDate.getDate() - 1);
+      checkStr = formatYYYYMMDD(checkDate);
+    } else {
+      break;
+    }
+  }
+
+  return count;
+}
+
+function updateStreakUI() {
+  const streakEl = document.getElementById('streakCounter');
+  if (!streakEl) return;
+  const streak = calculateStreak();
+  streakEl.textContent = `🔥 ${streak}일 연속 러닝!`;
+}
+
+function autoStampCompletedRun() {
+  const todayStr = formatYYYYMMDD(new Date());
+  const logs = loadRunLogs();
+  const entry = logs[todayStr] || {};
+  entry.completed = true;
+  entry.stamp = '🏃';
+  if (!entry.timeSec) {
+    entry.timeSec = totalSeconds || (settings.run * settings.sets);
+  }
+  logs[todayStr] = entry;
+  saveRunLogs(logs);
+  safeRenderCalendar();
+  updateSummaries();
+  updateStreakUI();
+}
+
+function exportCalendar() {
+  const backup = {
+    app: "IntervalTimerPWA",
+    version: "2.0",
+    exportedAt: new Date().toISOString(),
+    runLogs: loadRunLogs(),
+    customPresets: getCustomPresets(),
+    settings: settings
+  };
+  return JSON.stringify(backup, null, 2);
+}
+
+function importCalendar(data) {
+  let parsed = data;
+  if (typeof parsed === 'string') {
     try {
-      await wakeLock.release();
+      parsed = JSON.parse(parsed);
     } catch (err) {
-      console.warn('Screen Wake Lock release failed:', err);
+      console.error('Import JSON parse error:', err);
+      return false;
     }
-    wakeLock = null;
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+
+  try {
+    const runLogs = parsed.runLogs || (typeof parsed === 'object' && !parsed.customPresets && !parsed.settings ? parsed : null);
+    if (runLogs && typeof runLogs === 'object' && !Array.isArray(runLogs)) {
+      const existing = loadRunLogs();
+      const merged = { ...existing, ...runLogs };
+      saveRunLogs(merged);
+    }
+
+    if (Array.isArray(parsed.customPresets)) {
+      saveCustomPresets(parsed.customPresets);
+      renderPresetChips();
+    }
+
+    if (parsed.settings && typeof parsed.settings === 'object') {
+      if (parsed.settings.run) localStorage.setItem('runSec', parsed.settings.run);
+      if (parsed.settings.walk) localStorage.setItem('walkSec', parsed.settings.walk);
+      if (parsed.settings.sets) localStorage.setItem('setCount', parsed.settings.sets);
+      if (parsed.settings.warmup) localStorage.setItem('warmupSec', parsed.settings.warmup);
+      if (parsed.settings.finish) localStorage.setItem('finishSec', parsed.settings.finish);
+    }
+
+    safeRenderCalendar();
+    updateSummaries();
+    updateStreakUI();
+    return true;
+  } catch (err) {
+    console.error('importCalendar error:', err);
+    return false;
   }
 }
 
-document.addEventListener('visibilitychange', async ()=>{
-  if (document.visibilityState === 'visible' && isRunning) {
-    await requestWakeLock();
-    // immediately catch up any elapsed time while hidden/suspended
-    const now = Date.now();
-    const elapsedSec = lastTick ? Math.floor((now - lastTick) / 1000) : 0;
-    if (elapsedSec >= 1) {
-      lastTick = now;
-      consumeElapsedSeconds(elapsedSec);
-      updateDisplay();
+window.exportCalendar = exportCalendar;
+window.importCalendar = importCalendar;
+
+function formatDistanceDisplay(d) {
+  if (d == null || d === '') return '';
+  const n = Number(d) || 0;
+  if (n >= 1000) return `${(n/1000).toFixed(1).replace(/\.0$/,'')}k`;
+  if (n >= 100) return `${Math.round(n)}km`;
+  const s = n.toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
+  return `${s}km`;
+}
+
+function renderCalendar(year, month) {
+  if (!calendarDaysEl || !calendarMonthYear) return;
+
+  calDate = new Date(year, month, 1);
+  calendarMonthYear.textContent = calDate.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+
+  calendarDaysEl.innerHTML = '';
+  const firstDay = new Date(year, month, 1);
+  const startDay = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const prevMonthDays = new Date(year, month, 0).getDate();
+  const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
+  const logs = loadRunLogs();
+
+  for (let i = 0; i < totalCells; i++) {
+    const dayEl = document.createElement('div');
+    dayEl.className = 'calendar-day';
+    let cellDate, inThisMonth = true;
+
+    if (i < startDay) {
+      const d = prevMonthDays - (startDay - 1 - i);
+      dayEl.classList.add('other-month');
+      cellDate = new Date(year, month - 1, d);
+      inThisMonth = false;
+    } else if (i >= startDay + daysInMonth) {
+      const d = i - (startDay + daysInMonth) + 1;
+      dayEl.classList.add('other-month');
+      cellDate = new Date(year, month + 1, d);
+      inThisMonth = false;
+    } else {
+      const d = i - startDay + 1;
+      cellDate = new Date(year, month, d);
     }
+
+    const dateStr = formatYYYYMMDD(cellDate);
+    dayEl.setAttribute('data-date', dateStr);
+    dayEl.innerHTML = `<div class="day-number">${String(cellDate.getDate())}</div><div class="gym-badge" aria-hidden="true"></div>`;
+
+    if (!inThisMonth) {
+      dayEl.style.opacity = '0.45';
+    } else {
+      dayEl.onclick = () => selectDate(dateStr, cellDate);
+
+      const entry = logs[dateStr];
+      if (entry) {
+        const isRunCompleted = entry.completed || entry.stamp || Number(entry.timeSec) > 0 || Number(entry.distanceKm) > 0;
+        if (isRunCompleted) {
+          dayEl.classList.add('completed-stamp');
+        }
+
+        const gymBadgeEl = dayEl.querySelector('.gym-badge');
+        if (gymBadgeEl) {
+          if (entry.gym === true || entry.gym === 'true' || entry.gym === 1 || entry.gym === '1' || !!entry.gym) {
+            gymBadgeEl.textContent = 'GYM';
+            gymBadgeEl.classList.add('active');
+          } else {
+            gymBadgeEl.textContent = '';
+            gymBadgeEl.classList.remove('active');
+          }
+        }
+        const kmVal = (entry.distanceKm != null && entry.distanceKm !== '') ? formatDistanceDisplay(entry.distanceKm) : '';
+        const minVal = entry.timeSec ? `${Math.round(Number(entry.timeSec) / 60)}m` : '';
+
+        if (isRunCompleted || kmVal || minVal) {
+          const rec = document.createElement('div');
+          rec.className = 'day-record';
+
+          if (isRunCompleted) {
+            const stampEl = document.createElement('div');
+            stampEl.className = 'stamp-icon';
+            stampEl.textContent = '🏃';
+            rec.appendChild(stampEl);
+          } else if (kmVal) {
+            const kmEl = document.createElement('div');
+            kmEl.className = 'km';
+            kmEl.textContent = kmVal;
+            rec.appendChild(kmEl);
+          }
+
+          if (minVal && !isRunCompleted) {
+            const minEl = document.createElement('div');
+            minEl.className = 'min';
+            minEl.textContent = minVal;
+            rec.appendChild(minEl);
+          }
+
+          dayEl.appendChild(rec);
+        }
+      }
+    }
+
+    if (dateStr === selectedDateStr) dayEl.classList.add('selected');
+    calendarDaysEl.appendChild(dayEl);
   }
-});
+}
 
-/* START / PAUSE */
-toggleBtn.onclick = async ()=>{
-  if(!isRunning){
-    if(!audioContext) audioContext=new (window.AudioContext || window.webkitAudioContext)();
-    if(audioContext && audioContext.state === 'suspended') {
-      audioContext.resume();
+function safeRenderCalendar() {
+  try {
+    if (!calendarDaysEl) initCalendarRefs();
+    if (calendarDaysEl) renderCalendar(calDate.getFullYear(), calDate.getMonth());
+  } catch (err) {
+    console.error('safeRenderCalendar error:', err);
+  }
+}
+
+function selectDate(dateStr, dateObj) {
+  selectedDateStr = dateStr;
+  if (selectedDateLabel) {
+    selectedDateLabel.classList.remove('placeholder');
+    selectedDateLabel.textContent = `${dateObj.getFullYear()}. ${String(dateObj.getMonth() + 1).padStart(2, '0')}. ${String(dateObj.getDate()).padStart(2, '0')}.`;
+  }
+  const log = getLogFor(dateStr);
+  if (runTimeInput) runTimeInput.value = log ? String(Math.round((log.timeSec || 0) / 60)) : '';
+  if (runDistInput) runDistInput.value = log && log.distanceKm != null ? log.distanceKm : '';
+  if (gymCheckbox) gymCheckbox.checked = !!(log && log.gym);
+  renderCalendar(calDate.getFullYear(), calDate.getMonth());
+  updateSummaries(dateObj);
+}
+
+function saveRunBtnHandler() {
+  if (!selectedDateStr) return;
+  const minutes = Number(runTimeInput.value) || 0;
+  const timeSec = Math.max(0, Math.floor(minutes)) * 60;
+  const distanceKm = runDistInput && runDistInput.value !== '' ? Number(String(runDistInput.value).replace(',', '.')) : null;
+  const logs = loadRunLogs();
+  const gym = !!(gymCheckbox && gymCheckbox.checked);
+
+  if (timeSec > 0 || (distanceKm !== null && distanceKm > 0) || gym) {
+    const entry = logs[selectedDateStr] || {};
+    entry.timeSec = timeSec;
+    entry.distanceKm = distanceKm;
+    entry.gym = gym;
+    logs[selectedDateStr] = entry;
+  } else {
+    delete logs[selectedDateStr];
+  }
+  saveRunLogs(logs);
+  if (gymCheckbox) gymCheckbox.checked = !!logs[selectedDateStr]?.gym;
+  safeRenderCalendar();
+  updateSummaries(new Date(selectedDateStr + 'T00:00:00'));
+  updateStreakUI();
+}
+
+function deleteRunBtnHandler() {
+  if (!selectedDateStr) return;
+  const logs = loadRunLogs();
+  delete logs[selectedDateStr];
+  saveRunLogs(logs);
+  if (runTimeInput) runTimeInput.value = '';
+  if (runDistInput) runDistInput.value = '';
+  if (gymCheckbox) gymCheckbox.checked = false;
+  safeRenderCalendar();
+  updateSummaries(new Date(selectedDateStr + 'T00:00:00'));
+  updateStreakUI();
+}
+
+function initCalendarRefs() {
+  calendarEl = document.getElementById('calendar');
+  closeCalendarBtn = document.getElementById('closeCalendarBtn');
+  prevMonthBtn = document.getElementById('prevMonthBtn');
+  nextMonthBtn = document.getElementById('nextMonthBtn');
+  calendarMonthYear = document.getElementById('calendarMonthYear');
+  calendarDaysEl = document.getElementById('calendarDays');
+  selectedDateLabel = document.getElementById('selectedDateLabel');
+
+  runTimeInput = document.getElementById('runTimeInput');
+  runDistInput = document.getElementById('runDistInput');
+  saveRunBtn = document.getElementById('saveRunBtn');
+  deleteRunBtn = document.getElementById('deleteRunBtn');
+  gymCheckbox = document.getElementById('gymCheckbox');
+  calendarExportImportEl = document.getElementById('calendarExportImport');
+  exportCalendarBtn = document.getElementById('exportCalendarBtn');
+  importCalendarBtn = document.getElementById('importCalendarBtn');
+  importCalendarFileInput = document.getElementById('importCalendarFile');
+
+  if (prevMonthBtn) {
+    prevMonthBtn.onclick = () => {
+      calDate = new Date(calDate.getFullYear(), calDate.getMonth() - 1, 1);
+      safeRenderCalendar();
+    };
+  }
+  if (nextMonthBtn) {
+    nextMonthBtn.onclick = () => {
+      calDate = new Date(calDate.getFullYear(), calDate.getMonth() + 1, 1);
+      safeRenderCalendar();
+    };
+  }
+  if (closeCalendarBtn) closeCalendarBtn.onclick = closeCalendar;
+  if (saveRunBtn) saveRunBtn.onclick = saveRunBtnHandler;
+  if (deleteRunBtn) deleteRunBtn.onclick = deleteRunBtnHandler;
+
+  if (exportCalendarBtn) {
+    exportCalendarBtn.onclick = () => {
+      const payload = exportCalendar();
+      const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'interval-timer-backup.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+  }
+  if (importCalendarBtn) {
+    importCalendarBtn.onclick = () => {
+      if (!importCalendarFileInput) return;
+      importCalendarFileInput.value = '';
+      importCalendarFileInput.click();
+    };
+  }
+  if (importCalendarFileInput && !importCalendarFileInput.dataset.bound) {
+    importCalendarFileInput.dataset.bound = 'true';
+    importCalendarFileInput.addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result;
+        if (!importCalendar(text)) {
+          alert('Import failed. Invalid JSON format.');
+          return;
+        }
+        alert('Data successfully imported!');
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  if (gymCheckbox && !gymCheckbox.dataset.bound) {
+    gymCheckbox.dataset.bound = 'true';
+    gymCheckbox.addEventListener('change', () => {
+      if (selectedDateStr) saveRunBtnHandler();
+    });
+  }
+}
+
+function openCalendar() {
+  initCalendarRefs();
+  updateStreakUI();
+  const today = new Date();
+  calDate = new Date(today.getFullYear(), today.getMonth(), 1);
+  safeRenderCalendar();
+  if (calendarEl) {
+    calendarEl.classList.add('open');
+    calendarEl.setAttribute('aria-hidden', 'false');
+  }
+  if (overlay) overlay.classList.add('open');
+
+  const todayStr = formatYYYYMMDD(today);
+  const todayCell = calendarDaysEl && calendarDaysEl.querySelector('.calendar-day[data-date="' + todayStr + '"]');
+  if (todayCell && typeof todayCell.click === 'function') {
+    todayCell.click();
+  } else {
+    selectDate(todayStr, today);
+  }
+}
+
+function closeCalendar() {
+  if (calendarEl) {
+    calendarEl.classList.remove('open');
+    calendarEl.setAttribute('aria-hidden', 'true');
+  }
+  if (overlay) overlay.classList.remove('open');
+  selectedDateStr = null;
+  if (selectedDateLabel) {
+    selectedDateLabel.classList.add('placeholder');
+    selectedDateLabel.textContent = 'yyyy. mm. dd.';
+  }
+}
+
+/* ==========================================================================
+   10. INITIALIZATION & EVENT LISTENERS
+   ========================================================================== */
+// Wire main control buttons
+if (toggleBtn) {
+  toggleBtn.onclick = async () => {
+    if (!isRunning) {
+      if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      await requestWakeLock();
+      isRunning = true;
+      startTimerLoop();
+    } else {
+      isRunning = false;
+      pauseTimerLoop();
+      await releaseWakeLock();
     }
+    updateToggle();
+  };
+}
 
-    await requestWakeLock();
-    isRunning=true;
-    startTimerLoop();
-  }else{
-    isRunning=false;
-    pauseTimerLoop();
+if (resetBtn) {
+  resetBtn.onclick = async () => {
+    isRunning = false;
+    resetTimerLoop();
     await releaseWakeLock();
+
+    totalSeconds = 0;
+    setCount = 1;
+    currentMode = 'WARMUP';
+    intervalSecondsLeft = settings.warmup;
+
+    updateDisplay();
+    updateToggle();
+  };
+}
+
+if (settingsBtn) {
+  settingsBtn.onclick = () => {
+    settingsEl.classList.add('open');
+    overlay.classList.add('open');
+  };
+}
+
+function closeSettings() {
+  settingsEl.classList.remove('open');
+  overlay.classList.remove('open');
+
+  if (!isRunning) {
+    intervalSecondsLeft =
+      currentMode === 'RUN'
+        ? settings.run
+        : currentMode === 'WALK'
+        ? settings.walk
+        : currentMode === 'WARMUP'
+        ? settings.warmup
+        : settings.finish;
+    updateDisplay();
   }
-  updateToggle();
-};
+}
 
-/* RESET */
-resetBtn.onclick = async ()=>{
-  isRunning=false;
-  resetTimerLoop();
-  await releaseWakeLock();
+if (closeSettingsBtn) closeSettingsBtn.onclick = closeSettings;
+if (overlay) {
+  overlay.onclick = () => {
+    closeSettings();
+    closeCalendar();
+  };
+}
 
-  totalSeconds=0;
-  setCount=1;
-  currentMode='WARMUP';
-  intervalSecondsLeft=settings.warmup;
+if (calendarBtn) calendarBtn.onclick = openCalendar;
 
-  updateDisplay();
-  updateToggle();
-};
-
-/* INIT */
-updateDisplay();
-updateToggle();
-
-// --- ADDED: wire settings inputs so they persist and immediately apply ---
+// Wire setting input change handlers
 runInput.value = settings.run;
 walkInput.value = settings.walk;
 setInput.value = settings.sets;
@@ -1267,6 +1192,7 @@ runInput.addEventListener('change', () => {
   if (!isRunning && currentMode === 'RUN') { intervalSecondsLeft = v; updateDisplay(); }
   renderPresetChips();
 });
+
 walkInput.addEventListener('change', () => {
   const v = Math.max(1, Number(walkInput.value) || 1);
   walkInput.value = v;
@@ -1275,13 +1201,16 @@ walkInput.addEventListener('change', () => {
   if (!isRunning && currentMode === 'WALK') { intervalSecondsLeft = v; updateDisplay(); }
   renderPresetChips();
 });
+
 setInput.addEventListener('change', () => {
   const v = Math.max(1, Math.floor(Number(setInput.value) || 1));
   setInput.value = v;
   settings.sets = v;
   localStorage.setItem('setCount', v);
+  updateDisplay();
   renderPresetChips();
 });
+
 warmupInput.addEventListener('change', () => {
   const v = Math.max(0, Number(warmupInput.value) || 0);
   warmupInput.value = v;
@@ -1290,6 +1219,7 @@ warmupInput.addEventListener('change', () => {
   if (!isRunning && currentMode === 'WARMUP') { intervalSecondsLeft = v; updateDisplay(); }
   renderPresetChips();
 });
+
 finishInput.addEventListener('change', () => {
   const v = Math.max(0, Number(finishInput.value) || 0);
   finishInput.value = v;
@@ -1299,30 +1229,81 @@ finishInput.addEventListener('change', () => {
   renderPresetChips();
 });
 
-/* CALENDAR (날짜별 런 기록) */
-/* calendar logic kept once later in the file */
+// Wire Stepper Buttons (- / +)
+document.querySelectorAll('.step-btn').forEach((btn) => {
+  btn.onclick = () => {
+    const targetId = btn.dataset.target;
+    const step = Number(btn.dataset.step) || 0;
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    const min = Number(input.min) || 0;
+    let val = (Number(input.value) || 0) + step;
+    val = Math.max(min, val);
+    input.value = val;
+    input.dispatchEvent(new Event('change'));
+  };
+});
 
-/* initialize calendar month (hidden) */
-(function initCalendar() {
-  const today = new Date();
-  calDate = new Date(today.getFullYear(), today.getMonth(), 1);
+// Initial boot initialization
+(function init() {
+  initCalendarRefs();
+  updateDisplay();
+  updateToggle();
+  renderPresetChips();
   safeRenderCalendar();
   updateSummaries();
+  updateStreakUI();
 })();
 
-// Prevent double-tap-to-zoom on iOS Safari (prevents the UI from jumping)
+// Prevent double-tap-to-zoom on iOS Safari
 let _lastTouchEnd = 0;
 document.addEventListener('touchend', function (e) {
   const now = Date.now();
-  // ignore taps inside form controls / contenteditable so inputs still behave normally
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
     _lastTouchEnd = now;
     return;
   }
   if (now - _lastTouchEnd <= 300) {
-    // must use passive: false to allow preventDefault
     e.preventDefault();
   }
   _lastTouchEnd = now;
 }, { passive: false });
+
+/* Touch Swipe Gestures (Swipe Left -> Open Calendar, Swipe Right -> Close Calendar) */
+let touchStartX = 0;
+let touchStartY = 0;
+
+document.addEventListener('touchstart', (e) => {
+  if (e.touches && e.touches.length === 1) {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'TEXTAREA' || t.closest('.controls') || t.closest('.stepper-box') || t.closest('.quick-adjust-bar') || t.closest('.presets-chips-container'))) {
+      touchStartX = 0;
+      touchStartY = 0;
+      return;
+    }
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+}, { passive: true });
+
+document.addEventListener('touchend', (e) => {
+  if (!touchStartX || !touchStartY || !e.changedTouches || e.changedTouches.length === 0) return;
+
+  const deltaX = e.changedTouches[0].clientX - touchStartX;
+  const deltaY = e.changedTouches[0].clientY - touchStartY;
+
+  touchStartX = 0;
+  touchStartY = 0;
+
+  if (Math.abs(deltaX) >= 50 && Math.abs(deltaY) < 40) {
+    const isCalendarOpen = calendarEl && calendarEl.classList.contains('open');
+    const isSettingsOpen = settingsEl && settingsEl.classList.contains('open');
+
+    if (deltaX <= -50 && !isCalendarOpen && !isSettingsOpen) {
+      openCalendar();
+    } else if (deltaX >= 50 && isCalendarOpen) {
+      closeCalendar();
+    }
+  }
+}, { passive: true });

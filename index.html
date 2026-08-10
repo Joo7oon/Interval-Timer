@@ -33,13 +33,12 @@
 
   <!-- TOP BAR -->
   <div class="top-bar">
-    <button id="calendarBtn" class="calendar-btn" aria-label="Calendar">
-      📅
-    </button>
-    <div id="status" class="status WARMUP">WARMUP</div>
-    <div class="top-bar-right">
+    <div class="top-bar-left">
       <button id="pipBtn" class="pip-btn" aria-label="Picture-in-Picture Toggle">🖼️</button>
       <button id="muteBtn" class="mute-btn" aria-label="Mute Toggle">🔊</button>
+    </div>
+    <div id="status" class="status WARMUP">WARMUP</div>
+    <div class="top-bar-right">
       <button id="settingsBtn" class="settings-btn" aria-label="Settings">
         ⚙️
       </button>
@@ -47,7 +46,7 @@
   </div>
 
   <!-- TIME DISPLAY WITH CIRCULAR PROGRESS RING -->
-  <div class="timer-container">
+  <div id="timerContainer" class="timer-container">
     <svg class="progress-ring" viewBox="0 0 280 280">
       <circle class="progress-ring__bg" cx="140" cy="140" r="125" />
       <circle class="progress-ring__circle" id="progressCircle" cx="140" cy="140" r="125" />
@@ -56,9 +55,16 @@
       <div id="intervalTime" class="interval-time">00:00</div>
       <div class="top-meta">
         <div id="setCount" class="set-count">Set 1</div>
+        <div id="setDots" class="set-dots"></div>
         <div id="totalTime" class="total-time">Total 00:00</div>
       </div>
     </div>
+  </div>
+
+  <!-- QUICK TIME ADJUST BAR -->
+  <div class="quick-adjust-bar">
+    <button id="sub10Btn" class="quick-adj-btn" aria-label="-10 seconds">-10s</button>
+    <button id="add10Btn" class="quick-adj-btn" aria-label="+10 seconds">+10s</button>
   </div>
 
   <!-- CONTROLS -->
@@ -93,11 +99,19 @@
   <div class="settings-group-title">Prep & Finish</div>
   <div class="setting-item">
     <label>WARMUP (sec)</label>
-    <input id="warmupInput" type="number" min="0" />
+    <div class="stepper-box">
+      <button type="button" class="step-btn" data-target="warmupInput" data-step="-5">-</button>
+      <input id="warmupInput" type="number" min="0" />
+      <button type="button" class="step-btn" data-target="warmupInput" data-step="5">+</button>
+    </div>
   </div>
   <div class="setting-item">
     <label>FINISH (sec)</label>
-    <input id="finishInput" type="number" min="0" />
+    <div class="stepper-box">
+      <button type="button" class="step-btn" data-target="finishInput" data-step="-5">-</button>
+      <input id="finishInput" type="number" min="0" />
+      <button type="button" class="step-btn" data-target="finishInput" data-step="5">+</button>
+    </div>
   </div>
 </div>
 
@@ -106,15 +120,27 @@
   <div class="settings-group-title">Interval</div>
   <div class="setting-item">
     <label>RUN (sec)</label>
-    <input id="runInput" type="number" min="1" />
+    <div class="stepper-box">
+      <button type="button" class="step-btn" data-target="runInput" data-step="-5">-</button>
+      <input id="runInput" type="number" min="1" />
+      <button type="button" class="step-btn" data-target="runInput" data-step="5">+</button>
+    </div>
   </div>
   <div class="setting-item">
     <label>WALK (sec)</label>
-    <input id="walkInput" type="number" min="1" />
+    <div class="stepper-box">
+      <button type="button" class="step-btn" data-target="walkInput" data-step="-5">-</button>
+      <input id="walkInput" type="number" min="1" />
+      <button type="button" class="step-btn" data-target="walkInput" data-step="5">+</button>
+    </div>
   </div>
   <div class="setting-item">
     <label>Set Count</label>
-    <input id="setInput" type="number" min="1" />
+    <div class="stepper-box">
+      <button type="button" class="step-btn" data-target="setInput" data-step="-1">-</button>
+      <input id="setInput" type="number" min="1" />
+      <button type="button" class="step-btn" data-target="setInput" data-step="1">+</button>
+    </div>
   </div>
 </div>
 </div>
@@ -146,27 +172,30 @@
       <div id="monthSummary" class="calendar-summary-item">Month: 00:00 · 0.00 km</div>
     </div>
 
-    <div id="calendarExportImport" class="controls" style="display:flex; margin-bottom: 12px;">
-      <button id="exportCalendarBtn" type="button">JSON EXPORT</button>
-      <button id="importCalendarBtn" type="button">JSON IMPORT</button>
+    <div class="calendar-card">
+      <div class="setting-item">
+        <label>Run Distance (km)</label>
+        <input id="runDistInput" type="number" inputmode="decimal" step="0.01" placeholder="0.00" />
+      </div>
+      <div class="setting-item">
+        <label>Run Time (min)</label>
+        <input id="runTimeInput" type="number" inputmode="numeric" min="0" step="1" placeholder="mm" />
+      </div>
+      <div class="setting-item">
+        <label>GYM</label>
+        <input id="gymCheckbox" type="checkbox" />
+      </div>
+
+      <div class="controls">
+        <button id="saveRunBtn">SAVE</button>
+        <button id="deleteRunBtn">DELETE</button>
+      </div>
     </div>
 
-    <div class="setting-item">
-      <label>Run Distance (km)</label>
-      <input id="runDistInput" type="number" inputmode="decimal" step="0.01" placeholder="0.00" />
-    </div>
-    <div class="setting-item">
-      <label>Run Time (min)</label>
-      <input id="runTimeInput" type="number" inputmode="numeric" min="0" step="1" placeholder="mm" />
-    </div>
-    <div class="setting-item">
-      <label>GYM</label>
-      <input id="gymCheckbox" type="checkbox" />
-    </div>
-
-    <div class="controls">
-      <button id="saveRunBtn">SAVE</button>
-      <button id="deleteRunBtn">DELETE</button>
+    <!-- ISOLATED JSON BACKUP SUB-CONTROLS AT BOTTOM -->
+    <div id="calendarExportImport" class="backup-sub-controls">
+      <button id="exportCalendarBtn" type="button" class="backup-btn">JSON EXPORT</button>
+      <button id="importCalendarBtn" type="button" class="backup-btn">JSON IMPORT</button>
     </div>
   </div>
 </div>
