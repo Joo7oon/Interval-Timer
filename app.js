@@ -904,14 +904,16 @@ function renderCalendar(year, month) {
             stampEl.className = 'stamp-icon';
             stampEl.textContent = '🏃';
             rec.appendChild(stampEl);
-          } else if (kmVal) {
+          }
+
+          if (kmVal) {
             const kmEl = document.createElement('div');
             kmEl.className = 'km';
             kmEl.textContent = kmVal;
             rec.appendChild(kmEl);
           }
 
-          if (minVal && !isRunCompleted) {
+          if (minVal) {
             const minEl = document.createElement('div');
             minEl.className = 'min';
             minEl.textContent = minVal;
