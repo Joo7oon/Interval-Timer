@@ -826,9 +826,9 @@ window.importCalendar = importCalendar;
 function formatDistanceDisplay(d) {
   if (d == null || d === '') return '';
   const n = Number(d) || 0;
-  if (n >= 100) return `${Math.round(n)}k`;
+  if (n >= 100) return `${Math.round(n)}km`;
   const s = n.toFixed(1).replace(/\.0$/,'');
-  return `${s}k`;
+  return `${s}km`;
 }
 
 function renderCalendar(year, month) {
@@ -899,28 +899,21 @@ function renderCalendar(year, month) {
           rec.className = 'day-record';
 
           if (isRunCompleted) {
-            const stampEl = document.createElement('span');
+            const stampEl = document.createElement('div');
             stampEl.className = 'stamp-icon';
             stampEl.textContent = '🏃';
             rec.appendChild(stampEl);
           }
 
           if (kmVal) {
-            const kmEl = document.createElement('span');
+            const kmEl = document.createElement('div');
             kmEl.className = 'km';
             kmEl.textContent = kmVal;
             rec.appendChild(kmEl);
           }
 
-          if (kmVal && minVal) {
-            const sepEl = document.createElement('span');
-            sepEl.className = 'dot-sep';
-            sepEl.textContent = '·';
-            rec.appendChild(sepEl);
-          }
-
           if (minVal) {
-            const minEl = document.createElement('span');
+            const minEl = document.createElement('div');
             minEl.className = 'min';
             minEl.textContent = minVal;
             rec.appendChild(minEl);
