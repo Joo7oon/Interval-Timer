@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- 배경: 심연의 OLED 블랙 -->
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#151c28"/>
+      <stop offset="100%" stop-color="#080b10"/>
+    </radialGradient>
+
+    <!-- 토스 특유의 쨍하고 매끄러운 수평 그라데이션 (RUN/WALK) -->
+    <linearGradient id="tossGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2ED573"/>
+      <stop offset="100%" stop-color="#00F2FE"/>
+    </linearGradient>
+
+    <linearGradient id="tossGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE"/>
+      <stop offset="100%" stop-color="#1E90FF"/>
+    </linearGradient>
+
+    <!-- 은은한 소프트 입체 그림자 -->
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.01   0 0 0 0 0.83   0 0 0 0 0.99  0 0 0 0.35 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- iOS/Android 스쿼클 모던 배경 -->
+  <rect width="512" height="512" rx="115" fill="url(#bgGlow)"/>
+
+  <!-- 메인 심볼: 인터벌을 상징하는 두 개의 질주하는 네온 캡슐 링 -->
+  <g transform="translate(256, 256) rotate(-28)" filter="url(#softGlow)">
+    <!-- 1. RUN 캡슐 (위쪽 네온 그린-시안 스트로크) -->
+    <rect x="-140" y="-85" width="220" height="75" rx="37.5" 
+          fill="none" stroke="url(#tossGrad1)" stroke-width="32" stroke-linecap="round"/>
+
+    <!-- 2. WALK 캡슐 (아래쪽 교차하는 블루-시안 스트로크) -->
+    <rect x="-80" y="10" width="220" height="75" rx="37.5" 
+          fill="none" stroke="url(#tossGrad2)" stroke-width="32" stroke-linecap="round"/>
+
+    <!-- 역동적인 속도감을 더해주는 중앙 스피드 닷 -->
+    <circle cx="110" cy="-47.5" r="16" fill="#00F2FE"/>
+  </g>
+</svg>

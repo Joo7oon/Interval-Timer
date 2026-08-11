@@ -1,4 +1,4 @@
-const CACHE_NAME = "interval-stopwatch-cache-v2";
+const CACHE_NAME = "interval-stopwatch-cache-v4";
 const FILES_TO_CACHE = [
   "/",
   "/index.html",
@@ -6,6 +6,7 @@ const FILES_TO_CACHE = [
   "/app.js",
   "/timer-worker.js",
   "/manifest.json",
+  "/icon.svg",
   "/icon-192.png",
   "/icon-512.png"
 ];
