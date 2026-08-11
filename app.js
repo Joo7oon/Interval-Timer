@@ -842,7 +842,7 @@ function renderCalendar(year, month) {
   const startDay = firstDay.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const prevMonthDays = new Date(year, month, 0).getDate();
-  const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
+  const totalCells = 42; // Always fixed 6 rows x 7 days = 42 cells
   const logs = loadRunLogs();
 
   for (let i = 0; i < totalCells; i++) {
@@ -870,7 +870,7 @@ function renderCalendar(year, month) {
     dayEl.innerHTML = `<div class="day-number">${String(cellDate.getDate())}</div><div class="gym-badge" aria-hidden="true"></div>`;
 
     if (!inThisMonth) {
-      dayEl.style.opacity = '0.45';
+      dayEl.style.opacity = '0.35';
     } else {
       dayEl.onclick = () => selectDate(dateStr, cellDate);
 
