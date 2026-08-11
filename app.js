@@ -826,10 +826,9 @@ window.importCalendar = importCalendar;
 function formatDistanceDisplay(d) {
   if (d == null || d === '') return '';
   const n = Number(d) || 0;
-  if (n >= 1000) return `${(n/1000).toFixed(1).replace(/\.0$/,'')}k`;
-  if (n >= 100) return `${Math.round(n)}km`;
-  const s = n.toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
-  return `${s}km`;
+  if (n >= 100) return `${Math.round(n)}k`;
+  const s = n.toFixed(1).replace(/\.0$/,'');
+  return `${s}k`;
 }
 
 function renderCalendar(year, month) {
@@ -900,21 +899,28 @@ function renderCalendar(year, month) {
           rec.className = 'day-record';
 
           if (isRunCompleted) {
-            const stampEl = document.createElement('div');
+            const stampEl = document.createElement('span');
             stampEl.className = 'stamp-icon';
             stampEl.textContent = '🏃';
             rec.appendChild(stampEl);
           }
 
           if (kmVal) {
-            const kmEl = document.createElement('div');
+            const kmEl = document.createElement('span');
             kmEl.className = 'km';
             kmEl.textContent = kmVal;
             rec.appendChild(kmEl);
           }
 
+          if (kmVal && minVal) {
+            const sepEl = document.createElement('span');
+            sepEl.className = 'dot-sep';
+            sepEl.textContent = '·';
+            rec.appendChild(sepEl);
+          }
+
           if (minVal) {
-            const minEl = document.createElement('div');
+            const minEl = document.createElement('span');
             minEl.className = 'min';
             minEl.textContent = minVal;
             rec.appendChild(minEl);

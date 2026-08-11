@@ -812,15 +812,15 @@ input, textarea {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 4px;
-  grid-auto-rows: 44px;
+  grid-auto-rows: 48px;
   min-height: auto;
 }
 
 .calendar-day {
   background: var(--glass-bg);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  padding: 2px 2px;
-  height: 44px;
+  padding: 3px 2px;
+  height: 48px;
   text-align: center;
   border-radius: 8px;
   display: flex;
@@ -832,6 +832,7 @@ input, textarea {
   font-weight: 700;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .calendar-day:active {
@@ -839,7 +840,7 @@ input, textarea {
 }
 
 .calendar-day .day-number {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 800;
   line-height: 1;
   margin-top: 1px;
@@ -848,37 +849,43 @@ input, textarea {
 .calendar-day .day-record {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 2px;
   line-height: 1;
-  margin-top: 2px;
+  margin-top: 4px;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .calendar-day .day-record .stamp-icon {
   font-size: 10px;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .calendar-day .day-record .km {
-  font-size: 9.5px;
-  max-width: 48px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #2ed573;
+  font-size: 9px;
   font-weight: 700;
+  color: #2ed573;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.calendar-day .day-record .dot-sep {
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1;
 }
 
 .calendar-day .day-record .min {
   font-size: 9px;
-  max-width: 48px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #70a1ff;
   font-weight: 600;
+  color: #70a1ff;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .calendar-day.other-month { opacity: 0.3; }
@@ -892,34 +899,35 @@ input, textarea {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  padding: 0 4px;
 }
 
 .calendar-summary-item {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
   color: var(--text-muted);
 }
 
 .calendar-card {
   background: var(--glass-bg);
   border: var(--glass-border);
-  border-radius: 12px;
-  padding: 8px 12px;
-  margin-top: 4px;
-}
-
-.calendar-card .setting-item {
-  margin-bottom: 6px;
-}
-
-.calendar-details .controls {
+  border-radius: 14px;
+  padding: 10px 14px;
   margin-top: 6px;
 }
 
+.calendar-card .setting-item {
+  margin-bottom: 8px;
+}
+
+.calendar-details .controls {
+  margin-top: 10px;
+}
+
 .calendar-details .controls button {
-  padding: 8px 0;
-  font-size: 14px;
+  padding: 10px 0;
+  font-size: 15px;
 }
 
 #saveRunBtn, #exportCalendarBtn, #importCalendarBtn {
